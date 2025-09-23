@@ -1,5 +1,5 @@
 # 读取图像的设备，有 HIK 、 UVC 、 IMG 三种模式（海康相机，UVC协议的USB相机，图像）
-device: UVC
+device: HIK
 # 标定板类型
 pattern: chessboard
 pattern_rows: 8

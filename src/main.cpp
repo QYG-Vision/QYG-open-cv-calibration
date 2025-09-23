@@ -1,8 +1,12 @@
+#include <fstream>
 #include <iostream>
 #include <memory>
+#include <opencv2/calib3d.hpp>
+#include <opencv2/highgui.hpp>
 #include <opencv2/opencv.hpp>
+#include <yaml-cpp/emittermanip.h>
+#include <yaml-cpp/emitterstyle.h>
 #include <yaml-cpp/yaml.h>
-#include <fstream>
 
 #include "device.hpp"
 #include "hik_camera.hpp"
@@ -112,15 +116,16 @@ static void calcChessboardCorners(
  * @param dist_coeffs 畸变系数 (1xN，通常5个或8个)
  * @param filename 输出的YAML文件路径
  */
-void saveCalibrationYAML(const cv::Size& image_size,
-                         const cv::Mat& camera_matrix,
-                         const cv::Mat& dist_coeffs,
-                         const std::string& filename)
-{
+void saveCalibrationYAML(
+    const cv::Size& image_size,
+    const cv::Mat& camera_matrix,
+    const cv::Mat& dist_coeffs,
+    const std::string& filename
+) {
     YAML::Node node;
     node["image_width"] = image_size.width;
     node["image_height"] = image_size.height;
-    node["camera_name"] = "narrow_stereo";  // 你可以改成自己的相机名
+    node["camera_name"] = "narrow_stereo"; // 你可以改成自己的相机名
 
     // camera_matrix
     {
@@ -128,12 +133,13 @@ void saveCalibrationYAML(const cv::Size& image_size,
         cam["rows"] = camera_matrix.rows;
         cam["cols"] = camera_matrix.cols;
         std::vector<double> data;
-        camera_matrix.reshape(1,1).copyTo(data);
+        camera_matrix.reshape(1, 1).copyTo(data);
         cam["data"] = data;
+        cam["data"].SetStyle(YAML::EmitterStyle::Flow);
         node["camera_matrix"] = cam;
     }
 
-    node["distortion_model"] = "plumb_bob";  // 默认模型
+    node["distortion_model"] = "plumb_bob"; // 默认模型
 
     // distortion_coefficients
     {
@@ -141,8 +147,9 @@ void saveCalibrationYAML(const cv::Size& image_size,
         dist["rows"] = dist_coeffs.rows;
         dist["cols"] = dist_coeffs.cols;
         std::vector<double> data;
-        dist_coeffs.reshape(1,1).copyTo(data);
+        dist_coeffs.reshape(1, 1).copyTo(data);
         dist["data"] = data;
+        dist["data"].SetStyle(YAML::EmitterStyle::Flow);
         node["distortion_coefficients"] = dist;
     }
 
@@ -153,25 +160,26 @@ void saveCalibrationYAML(const cv::Size& image_size,
         rect["rows"] = R.rows;
         rect["cols"] = R.cols;
         std::vector<double> data;
-        R.reshape(1,1).copyTo(data);
+        R.reshape(1, 1).copyTo(data);
         rect["data"] = data;
+        rect["data"].SetStyle(YAML::EmitterStyle::Flow);
         node["rectification_matrix"] = rect;
     }
 
     // projection_matrix (这里用 getOptimalNewCameraMatrix 生成)
     {
-        cv::Mat newCameraMatrix = cv::getOptimalNewCameraMatrix(
-                                      camera_matrix, dist_coeffs,
-                                      image_size, 1.0, image_size);
+        cv::Mat newCameraMatrix =
+            cv::getOptimalNewCameraMatrix(camera_matrix, dist_coeffs, image_size, 1.0, image_size);
         cv::Mat P = cv::Mat::eye(3, 4, CV_64F);
-        newCameraMatrix.copyTo(P(cv::Rect(0,0,3,3)));
+        newCameraMatrix.copyTo(P(cv::Rect(0, 0, 3, 3)));
 
         YAML::Node proj;
         proj["rows"] = P.rows;
         proj["cols"] = P.cols;
         std::vector<double> data;
-        P.reshape(1,1).copyTo(data);
+        P.reshape(1, 1).copyTo(data);
         proj["data"] = data;
+        proj["data"].SetStyle(YAML::EmitterStyle::Flow);
         node["projection_matrix"] = proj;
     }
 
@@ -182,7 +190,6 @@ void saveCalibrationYAML(const cv::Size& image_size,
 
     std::cout << "标定结果已保存到 " << filename << std::endl;
 }
-
 
 int main(int argc, char* argv[]) {
     // 读取命令行参数
@@ -203,10 +210,13 @@ int main(int argc, char* argv[]) {
     std::vector<std::vector<cv::Point3f>> obj_points;
     std::vector<std::vector<cv::Point2f>> img_points;
     Size img_size;
-    // 搜索标定板角点
+    // 模式
     auto mode = Calibrating;
+    // 标定数据
     cv::Mat camera_matrix, distort_coeffs;
     std::vector<cv::Mat> rvecs, tvecs;
+    int img_num = 0;    // 标定图像数量
+    cv::TickMeter tm;   // 延迟计时器
     while (true) {
         // 获取图像
         auto img = device->get_image();
@@ -224,12 +234,7 @@ int main(int argc, char* argv[]) {
         bool found;
         switch (paramer->pattern) {
             case CHESSBOARD:
-                found = findChessboardCorners(
-                    img_gray,
-                    paramer->boardSize,
-                    pixel_points,
-                    CALIB_CB_ADAPTIVE_THRESH | CALIB_CB_FAST_CHECK | CALIB_CB_NORMALIZE_IMAGE
-                );
+                found = findChessboardCornersSB(img_gray, paramer->boardSize, pixel_points, CALIB_CB_EXHAUSTIVE+cv::CALIB_CB_ACCURACY);
                 break;
             case CIRCLES_GRID:
                 found = findCirclesGrid(img_gray, paramer->boardSize, pixel_points);
@@ -246,16 +251,6 @@ int main(int argc, char* argv[]) {
                 return fprintf(stderr, "Unknown pattern type\n"), -1;
         }
 
-        // 棋盘标定板角点优化，亚像素级角点检测
-        if (paramer->pattern == CHESSBOARD && found)
-            cornerSubPix(
-                img_gray,
-                pixel_points,
-                Size(11, 11),
-                Size(-1, -1),
-                TermCriteria(TermCriteria::EPS + TermCriteria::COUNT, 30, 0.0001)
-            );
-
         // 获得 pixel_points 对应的 object_points
         vector<Point3f> object_points(pixel_points.size());
         if (found && mode == Calibrating) {
@@ -270,6 +265,7 @@ int main(int argc, char* argv[]) {
 
             obj_points.push_back(object_points);
             img_points.push_back(pixel_points);
+
         }
 
         // 可视化标定角点识别结果
@@ -277,10 +273,13 @@ int main(int argc, char* argv[]) {
         if (found)
             drawChessboardCorners(img_gray, paramer->boardSize, Mat(pixel_points), found);
 
-        imshow("image", img);
+        imshow("image", img_gray);
 
-        int key = waitKey(30);
+
+        int key = waitKey(10);
         if (key == 'c' && mode == Calibrating) {
+            tm.reset();
+            tm.start();
             // 相机标定
             auto criteria = cv::TermCriteria(
                 cv::TermCriteria::COUNT + cv::TermCriteria::EPS,
@@ -321,14 +320,20 @@ int main(int argc, char* argv[]) {
             std::cout << "Reprojection error: " << error << std::endl;
 
             mode = Calibrated;
+
+            tm.stop();
+            std::cout << "calibrateCamera Latency:" << tm.getTimeSec() << " s" << std::endl;
+            waitKey();
         } else if (key == 'u' && mode == Calibrated) {
             mode = Undistorting;
-        }else if (mode == Calibrated || mode == Undistorting){  // 保存标定结果
+        } else if (key == 's' && (mode == Calibrated || mode == Undistorting) ) { // 保存标定结果
             saveCalibrationYAML(img_size, camera_matrix, distort_coeffs, "camera_calibration.yaml");
-        } 
-        else if (key == 27) {
+        } else if (key == 27) {
             return 0;
         }
+
+
+
     }
 
     return 0;
