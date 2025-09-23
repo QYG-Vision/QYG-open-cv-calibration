@@ -1,9 +1,15 @@
-device: HIK
+# 读取图像的设备，有 HIK 、 UVC 、 IMG 三种模式（海康相机，UVC协议的USB相机，图像）
+device: UVC
+# 标定板类型
+pattern: chessboard
+pattern_rows: 8
+pattern_cols: 8
+square_size: 35  # 标定板方格边长，单位：毫米
 HIK:
   enable_frame_rate: false
   frame_rate: 200
   exposure_time: 2000
-  gain: 16
+  gain: 16.0
   adc_bit_depth: ADCBitDepth_8
   pixel_format: BayerRG8
 UVC:
@@ -13,3 +19,5 @@ UVC:
   frame_rate: 30
   exposure_time: 100
   gain: 16
+IMG:
+  images_path: /home/qidian/images

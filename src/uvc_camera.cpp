@@ -2,8 +2,7 @@
 
 namespace qd::Device {
 
-UVC_Camera::UVC_Camera(const std::string& config_path) {
-    
+UVC_Camera::UVC_Camera(const std::string& config_path): queue_(1) {
     auto yaml = YAML::LoadFile(config_path);
     auto video_path = yaml["UVC"]["video_path"].as<std::string>();
     auto image_width = yaml["UVC"]["image_width"].as<int>();
@@ -13,25 +12,42 @@ UVC_Camera::UVC_Camera(const std::string& config_path) {
     auto gain = yaml["UVC"]["gain"].as<int>();
 
     cap.open(video_path);
-    if(!cap.isOpened()){
+    if (!cap.isOpened()) {
         std::cout << "fail to open uvc camera, video path: " << video_path << std::endl;
     }
 
     cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
-    cap.set(cv::CAP_PROP_FRAME_WIDTH, image_width);  // 设置宽度
-    cap.set(cv::CAP_PROP_FRAME_HEIGHT, image_height);// 设置高度
-    cap.set(cv::CAP_PROP_FPS,  frame_rate);          // 设置帧率
-    cap.set(cv::CAP_PROP_EXPOSURE,  exposure_time);  // 设置曝光值
-    cap.set(cv::CAP_PROP_GAIN,  gain);               // 设置增益
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, image_width); // 设置宽度
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, image_height); // 设置高度
+    cap.set(cv::CAP_PROP_FPS, frame_rate); // 设置帧率
+    cap.set(cv::CAP_PROP_EXPOSURE, exposure_time); // 设置曝光值
+    cap.set(cv::CAP_PROP_GAIN, gain); // 设置增益
+
+    // 开线程获取图像
+    daemon_thread_ = std::thread([this]() {
+        while (true) {
+            cv::Mat img;
+            cap >> img; // Capture a new image frame
+            if (img.empty()) {
+                std::cerr << "Warning: Captured empty frame from UVC camera." << std::endl;
+                continue;
+            }
+            queue_.push(img);
+        }
+    });
 }
 
 UVC_Camera::~UVC_Camera() {
-    cap.release();
+    if (daemon_thread_.joinable())
+        daemon_thread_.join();
+    if (cap.isOpened())
+        cap.release();
 }
 
 cv::Mat UVC_Camera::get_image() {
-    cap >> image; // Capture a new image frame
-    return image;
+    cv::Mat data;
+    queue_.pop(data);
+    return data;
 }
-    
-}
+
+} // namespace qd::Device

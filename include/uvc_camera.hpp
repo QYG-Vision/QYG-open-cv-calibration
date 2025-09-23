@@ -1,20 +1,24 @@
 #pragma once
-#include <opencv2/opencv.hpp>
-#include <yaml-cpp/yaml.h>
 #include "device.hpp"
+#include "thread_safe_queue.hpp"
+#include <opencv2/opencv.hpp>
+#include <string>
+#include <thread>
+#include <yaml-cpp/yaml.h>
 
 namespace qd::Device {
 
-class UVC_Camera : public Device {
-
+class UVC_Camera: public Device {
 public:
-  UVC_Camera(const std::string& config_path);
-  ~UVC_Camera();
-  cv::Mat get_image() override;
+    UVC_Camera(const std::string& config_path);
+    ~UVC_Camera();
+    cv::Mat get_image() override;
 
 private:
-  cv::VideoCapture cap;
-  cv::Mat image;
+    cv::VideoCapture cap;
+    cv::Mat image;
+    tools::ThreadSafeQueue<cv::Mat> queue_;
+    std::thread daemon_thread_;
 };
 
-}
+} // namespace qd::Device
