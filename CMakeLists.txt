@@ -14,7 +14,7 @@ aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src SRC_LIST)
 find_package(OpenCV REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
-add_executable(${PROJECT_NAME} ${SRC_LIST})
+add_executable(${PROJECT_NAME} calibrate_camera.cpp ${SRC_LIST})
 
 # 海康SDK
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/hikSDK/include)

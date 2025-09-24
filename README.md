@@ -16,4 +16,3 @@ make -C build
 ./build/calibration
 ```
 
-> 可视化的进度条图一乐
