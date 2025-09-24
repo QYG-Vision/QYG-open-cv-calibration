@@ -1,9 +1,14 @@
 #pragma once
+#include <Eigen/Dense>
+#include <fmt/core.h>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
-#include <opencv2/core/mat.hpp>
+#include <opencv2/core/eigen.hpp>
 #include <opencv2/opencv.hpp>
+#include <sstream>
 #include <yaml-cpp/yaml.h>
+#include <fmt/format.h>
 
 namespace qd::calibrate {
 
@@ -42,10 +47,14 @@ struct Paramer {
 
 class Calibrate {
 public:
-    Calibrate(const std::string& config_path): paramer(config_path) {};
+    Calibrate(const std::string& config_path);
 
-    void collect(Mat& img);
-    void calibrate();
+    void collect_camera(Mat& img);
+    void collect_handeye(Mat& img, const Eigen::Quaterniond& q);
+
+    void calibrate_camera();
+    void calibrate_handeye();
+
     vector<Point3f> calcChessboardCorners(std::vector<cv::Point2f>& pixel_points);
     bool find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pixel_points);
 
@@ -56,11 +65,23 @@ private:
         const cv::Mat& dist_coeffs,
         const std::string& filename
     );
+    void print_yaml(
+        const cv::Mat& R_camera2gimbal,
+        const cv::Mat& t_camera2gimbal,
+        const Eigen::Vector3d& rpy
+    );
 
 private:
     Size img_size;
+
+    // 标定用数据
     std::vector<std::vector<cv::Point3f>> obj_points;
     std::vector<std::vector<cv::Point2f>> img_points;
+    cv::Matx33d camera_matrix;
+    cv::Mat distort_coeffs;
+    std::vector<cv::Mat> rvecs, tvecs;
+    // 手眼标定用数据
+    std::vector<cv::Mat> R_gimbal2world_list, t_gimbal2world_list;
 
     cv::TickMeter tm; // 延迟计时器
     int collected_count = 0; // 已采集的标定图像数量

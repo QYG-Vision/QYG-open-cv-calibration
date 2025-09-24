@@ -8,8 +8,8 @@ square_size: 35  # 标定板方格边长，单位：毫米
 HIK:
   enable_frame_rate: false  # 是否锁帧
   frame_rate: 200           # 锁帧时的帧率
-  exposure_time: 2000       # 曝光时间，单位：微秒
-  gain: 16.0                # 增益
+  exposure_time: 1000       # 曝光时间，单位：微秒
+  gain: 1.0                # 增益
   adc_bit_depth: ADCBitDepth_8  # ADC位深，8或10
   pixel_format: BayerRG8    
 UVC:
@@ -21,3 +21,11 @@ UVC:
   gain: 16                  # 增益 
 IMG:
   images_path: /home/qidian/images # 图像路径
+
+# 手眼标定
+enable_handeye: true
+camera_matrix: [1775.1300101814929, 0, 710.22041588791421, 0, 1777.9427175568535, 599.38373307949621, 0, 0, 1]
+distort_coeffs: [-0.081907189655237952, 0.14019999270205855, -0.0012264127665053185, 0.0014292255962000792, 0]
+Serial:
+  port_name: /dev/ttyUSB0
+  baud_rate: 115200

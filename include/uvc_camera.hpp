@@ -13,7 +13,7 @@ public:
     UVC_Camera(const std::string& config_path);
     ~UVC_Camera();
     cv::Mat get_image() override;
-
+    void read(cv::Mat& img, std::chrono::steady_clock::time_point& timestamp) override{};
 private:
     cv::VideoCapture cap;
     cv::Mat image;

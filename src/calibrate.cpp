@@ -1,43 +1,78 @@
 #include "calibrate.hpp"
+#include <fmt/core.h>
+#include <opencv2/core/mat.hpp>
 
 namespace qd::calibrate {
 
-void Calibrate::collect(Mat& img) {
+Calibrate::Calibrate(const std::string& config_path): paramer(config_path) {
+    auto yaml = YAML::LoadFile(config_path);
+    if (yaml["enable_handeye"].as<bool>()) {
+        auto camera_matrix_data = yaml["camera_matrix"].as<std::vector<double>>();
+        auto distort_coeffs_data = yaml["distort_coeffs"].as<std::vector<double>>();
+        this->camera_matrix = cv::Matx33d(camera_matrix_data.data());
+        this->distort_coeffs = cv::Mat(distort_coeffs_data);
+
+        // debug
+        fmt::print("import camera_matrix_data: {} \n", fmt::join(camera_matrix_data, ", "));
+        fmt::print("import distort_coeffs_data: {} \n", fmt::join(distort_coeffs_data, ", "));
+    }
+}
+
+void Calibrate::collect_camera(Mat& img) {
     img_size = img.size();
 
     // 查找标定点 pixel_points
     std::vector<Point2f> pixel_points;
     bool found = find_Chessboard(img, pixel_points);
 
+    vector<Point3f> object_points;
     if (found) {
         // 获得 pixel_points 对应的 object_points
-        auto object_points = calcChessboardCorners(pixel_points);
+        object_points = calcChessboardCorners(pixel_points);
         object_points[paramer.boardSize.width - 1].x =
             object_points[0].x + paramer.grid_width; // 右上角点修正
 
-        obj_points.push_back(object_points);
-        img_points.push_back(pixel_points);
-        collected_count++;
+        this->obj_points.push_back(object_points);
+        this->img_points.push_back(pixel_points);
+        this->collected_count++;
     }
 
     // 在图像上绘制并显示角点
-    drawChessboardCorners(img, paramer.boardSize, Mat(pixel_points), found);
+    drawChessboardCorners(img, this->paramer.boardSize, Mat(pixel_points), found);
     // 在图像上显示已采集的数量
-    std::string text = "Collected: " + std::to_string(collected_count);
+    std::string text = "Collected: " + std::to_string(this->collected_count);
     putText(img, text, Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
+
+    // 手眼标定需要
+    if (this->distort_coeffs.empty() && (!found)) {
+        return;
+    }
+
+    Mat rvec, tvec;
+    cv::solvePnP(
+        object_points,
+        pixel_points,
+        this->camera_matrix,
+        this->distort_coeffs,
+        rvec,
+        tvec,
+        false,
+        cv::SOLVEPNP_IPPE
+    );
+    this->rvecs.push_back(rvec);
+    this->tvecs.push_back(tvec);
 }
 
-void Calibrate::calibrate() {
+void Calibrate::calibrate_camera() {
     if (obj_points.size() < 1) {
         std::cerr << "Not enough data for calibration. Need at least 1 valid image." << std::endl;
         return;
     }
 
-    cv::Mat camera_matrix, distort_coeffs;
-    std::vector<cv::Mat> rvecs, tvecs;
-    std::cout << "Start Calibrate !!! " << std::endl;
+    std::cout << "Start calibrate_camera !!! " << std::endl;
 
     // 相机标定
+    Mat camera_matrix, distort_coeffs;
     tm.reset();
     tm.start();
     auto criteria = cv::TermCriteria(
@@ -236,6 +271,112 @@ void Calibrate::saveCalibrationYAML(
     fout.close();
 
     std::cout << "标定结果已保存到 " << filename << std::endl;
+}
+
+/**
+    @brief 手眼标定收集数据
+*/
+void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q) {
+    // 计算云台的欧拉角
+    Eigen::Matrix3d R_gimbal2world = q.toRotationMatrix();
+
+    collect_camera(img);
+
+    cv::Mat t_gimbal2world = (cv::Mat_<double>(3, 1) << 0, 0, 0);
+    cv::Mat R_gimbal2world_cv;
+    cv::eigen2cv(R_gimbal2world, R_gimbal2world_cv);
+
+    this->R_gimbal2world_list.emplace_back(R_gimbal2world_cv);
+    this->t_gimbal2world_list.emplace_back(t_gimbal2world);
+
+    // 可视化
+    Eigen::Vector3d rpy = q.toRotationMatrix().eulerAngles(0, 1, 2);
+    // yaw
+    {
+        std::ostringstream oss;
+        oss << "yaw   " << std::fixed << std::setprecision(2) << rpy[2];
+        cv::putText(img, oss.str(), { 40, 40 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
+    }
+
+    // pitch
+    {
+        std::ostringstream oss;
+        oss << "pitch " << std::fixed << std::setprecision(2) << rpy[1];
+        cv::putText(img, oss.str(), { 40, 80 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
+    }
+
+    // roll
+    {
+        std::ostringstream oss;
+        oss << "roll  " << std::fixed << std::setprecision(2) << rpy[0];
+        cv::putText(img, oss.str(), { 40, 120 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
+    }
+}
+
+void Calibrate::calibrate_handeye() {
+    // 手眼标定
+    std::cout << "Start calibrate_handeye !!! " << std::endl;
+    tm.reset();
+    tm.start();
+    cv::Mat R_camera2gimbal, t_camera2gimbal;
+    cv::calibrateHandEye(
+        this->R_gimbal2world_list,
+        this->t_gimbal2world_list,
+        this->rvecs,
+        this->tvecs,
+        R_camera2gimbal,
+        t_camera2gimbal
+    );
+    tm.stop();
+    std::cout << "calibrateHandeye Latency:" << tm.getTimeSec() << " s" << std::endl;
+
+    t_camera2gimbal /= 1e3; // mm to m
+
+    // 计算相机同理想情况的偏角
+    Eigen::Matrix3d R_camera2gimbal_eigen;
+    cv::cv2eigen(R_camera2gimbal, R_camera2gimbal_eigen);
+    Eigen::Matrix3d R_gimbal2ideal { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } };
+    Eigen::Matrix3d R_camera2ideal = R_gimbal2ideal * R_camera2gimbal_eigen;
+    Eigen::Vector3d rpy = R_camera2ideal.eulerAngles(0, 1, 2) * 57.3; // degree
+
+    // 输出yaml
+    print_yaml(R_camera2gimbal, t_camera2gimbal, rpy);
+}
+
+void Calibrate::print_yaml(
+    const cv::Mat& R_camera2gimbal,
+    const cv::Mat& t_camera2gimbal,
+    const Eigen::Vector3d& rpy
+) {
+    YAML::Emitter result;
+    std::vector<double> R_camera2gimbal_data(
+        R_camera2gimbal.begin<double>(),
+        R_camera2gimbal.end<double>()
+    );
+    std::vector<double> t_camera2gimbal_data(
+        t_camera2gimbal.begin<double>(),
+        t_camera2gimbal.end<double>()
+    );
+
+    result << YAML::BeginMap;
+    //   result << YAML::Key << "R_gimbal2imubody";
+    //   result << YAML::Value << YAML::Flow << R_gimbal2imubody_data;
+    result << YAML::Newline;
+    result << YAML::Newline;
+    result << YAML::Comment(fmt::format(
+        "相机同理想情况的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
+        rpy[2],
+        rpy[1],
+        rpy[0]
+    ));
+    result << YAML::Key << "R_camera2gimbal";
+    result << YAML::Value << YAML::Flow << R_camera2gimbal_data;
+    result << YAML::Key << "t_camera2gimbal";
+    result << YAML::Value << YAML::Flow << t_camera2gimbal_data;
+    result << YAML::Newline;
+    result << YAML::EndMap;
+
+    fmt::print("\n{}\n", result.c_str());
 }
 
 } // namespace qd::calibrate

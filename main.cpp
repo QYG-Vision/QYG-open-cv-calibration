@@ -1,8 +1,12 @@
+#include "calibrate.hpp"
 #include "device.hpp"
 #include "hik_camera.hpp"
 #include "image_reader.hpp"
+#include "serial_driver.hpp"
 #include "uvc_camera.hpp"
-#include "calibrate.hpp"
+#include <memory>
+#include <opencv2/core/mat.hpp>
+#include <opencv2/highgui.hpp>
 
 using namespace std;
 using namespace cv;
@@ -45,25 +49,50 @@ int main(int argc, char* argv[]) {
 
     // 初始化设备
     auto device = load_device(config_path);
+    // 初始化标定类
     auto calibrate_ = qd::calibrate::Calibrate(config_path);
 
+    // 手眼标定串口
+    auto yaml = YAML::LoadFile(config_path);
+    bool enable_handeye = yaml["enable_handeye"].as<bool>();
+    std::unique_ptr<Serial_driver> protocol_;
+    if (enable_handeye) {
+        protocol_ = std::make_unique<Serial_driver>(config_path);
+    }
+
     namedWindow("image", WINDOW_NORMAL);
-
-
+    std::chrono::steady_clock::time_point timestamp;
+    Eigen::Quaterniond q;
     while (true) {
         // 获取图像
-        auto img = device->get_image();
-        if (img.empty()) {
+        Mat img;
+        if (enable_handeye) {
+            device->read(img, timestamp);
+            q = protocol_->read(timestamp);
+        } else {
+            img = device->get_image();
+        }
+
+        if (img.empty() && !enable_handeye) {
             cout << "image is empty" << endl;
-            calibrate_.collect(img);
+            calibrate_.calibrate_camera();
             break;
         }
 
-        calibrate_.collect(img);
+        if (enable_handeye) {
+            calibrate_.collect_handeye(img, q);
+        } else {
+            calibrate_.collect_camera(img);
+        }
 
         int key = waitKey(10);
         if (key == 'c') {
-            calibrate_.calibrate();
+            if (enable_handeye) {
+                calibrate_.calibrate_handeye();
+            } else {
+                calibrate_.calibrate_camera();
+            }
+            waitKey();
         } else if (key == 27) {
             break;
         }
