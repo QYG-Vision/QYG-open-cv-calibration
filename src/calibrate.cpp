@@ -133,8 +133,8 @@ bool Calibrate::find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pi
             found = findChessboardCornersSB(
                 img_gray,
                 paramer.boardSize,
-                pixel_points,
-                CALIB_CB_EXHAUSTIVE + cv::CALIB_CB_ACCURACY // 精度高flags，但是慢，默认的会快点
+                pixel_points
+                // CALIB_CB_EXHAUSTIVE + cv::CALIB_CB_ACCURACY // 精度高flags，但是慢，默认的会快点
             );
             break;
         case CIRCLES_GRID:
