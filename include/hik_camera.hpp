@@ -19,6 +19,7 @@ public:
 private:
     void* camera_handle_;
     int nRet = MV_OK;
+    cv::ColorConversionCodes color_code_;
     cv::Mat image;
     tools::ThreadSafeQueue<cv::Mat> queue_;
     std::thread daemon_thread_;

@@ -8,6 +8,7 @@
 #include <yaml-cpp/emitterstyle.h>
 #include <yaml-cpp/yaml.h>
 
+#include "CoverageTracker.hpp"
 #include "device.hpp"
 #include "hik_camera.hpp"
 #include "image_reader.hpp"
@@ -38,8 +39,8 @@ struct Paramer {
             pattern = CHESSBOARD;
 
         // 标定板尺寸
-        boardSize.width = yaml["pattern_rows"].as<int>();
-        boardSize.height = yaml["pattern_cols"].as<int>();
+        boardSize.height = yaml["pattern_rows"].as<int>();
+        boardSize.width = yaml["pattern_cols"].as<int>();
 
         squareSize = yaml["square_size"].as<float>();
         grid_width = squareSize * (boardSize.width - 1);
@@ -215,26 +216,86 @@ int main(int argc, char* argv[]) {
     // 标定数据
     cv::Mat camera_matrix, distort_coeffs;
     std::vector<cv::Mat> rvecs, tvecs;
-    int img_num = 0;    // 标定图像数量
-    cv::TickMeter tm;   // 延迟计时器
+    cv::TickMeter tm; // 延迟计时器
+    // 进度追踪
+    std::unique_ptr<CoverageTracker> tracker;
+
+    // 标定函数
+    auto calibrate = [&]() {
+        std::cout << "Start Calibrate !!! " << std::endl;
+        // 相机标定
+        auto criteria = cv::TermCriteria(
+            cv::TermCriteria::COUNT + cv::TermCriteria::EPS,
+            100,
+            DBL_EPSILON
+        ); // 默认迭代次数(30)有时会导致结果发散，故设为100
+        cv::calibrateCamera(
+            obj_points,
+            img_points,
+            img_size,
+            camera_matrix,
+            distort_coeffs,
+            rvecs,
+            tvecs,
+            cv::CALIB_FIX_K3,
+            criteria
+        ); // 由于视场角较小，不需要考虑k3
+
+        // 重投影误差
+        double error_sum = 0;
+        size_t total_points = 0;
+        for (size_t i = 0; i < obj_points.size(); i++) {
+            std::vector<cv::Point2f> reprojected_points;
+            cv::projectPoints(
+                obj_points[i],
+                rvecs[i],
+                tvecs[i],
+                camera_matrix,
+                distort_coeffs,
+                reprojected_points
+            );
+
+            total_points += reprojected_points.size();
+            for (size_t j = 0; j < reprojected_points.size(); j++)
+                error_sum += cv::norm(img_points[i][j] - reprojected_points[j]);
+        }
+        auto error = error_sum / total_points;
+        std::cout << "Reprojection error: " << error << std::endl;
+
+        std::cout << "Camera Matrix: \n" << camera_matrix << std::endl;
+        std::cout << "Distortion Coefficients: \n" << distort_coeffs << std::endl;
+        std::cout << "Calibration Done !!! " << std::endl;
+
+        mode = Calibrated;
+    };
+
     while (true) {
         // 获取图像
         auto img = device->get_image();
         if (img.empty()) {
             cout << "image is empty" << endl;
+            calibrate();
             break;
         }
 
         img_size = img.size();
 
-        // 查找标定点
+        if (tracker == nullptr)
+            tracker = std::make_unique<CoverageTracker>(img_size);
+
+        // 查找标定点 pixel_points
         Mat img_gray;
         vector<Point2f> pixel_points;
         cv::cvtColor(img, img_gray, COLOR_BGR2GRAY);
         bool found;
         switch (paramer->pattern) {
             case CHESSBOARD:
-                found = findChessboardCornersSB(img_gray, paramer->boardSize, pixel_points, CALIB_CB_EXHAUSTIVE+cv::CALIB_CB_ACCURACY);
+                found = findChessboardCornersSB(
+                    img_gray,
+                    paramer->boardSize,
+                    pixel_points,
+                    CALIB_CB_EXHAUSTIVE + cv::CALIB_CB_ACCURACY
+                );
                 break;
             case CIRCLES_GRID:
                 found = findCirclesGrid(img_gray, paramer->boardSize, pixel_points);
@@ -266,74 +327,28 @@ int main(int argc, char* argv[]) {
             obj_points.push_back(object_points);
             img_points.push_back(pixel_points);
 
+            tracker->update(pixel_points); // 更新进度
         }
-
-        // 可视化标定角点识别结果
-        cv::cvtColor(img_gray, img_gray, COLOR_GRAY2BGR);
-        if (found)
-            drawChessboardCorners(img_gray, paramer->boardSize, Mat(pixel_points), found);
-
-        imshow("image", img_gray);
-
 
         int key = waitKey(10);
         if (key == 'c' && mode == Calibrating) {
             tm.reset();
             tm.start();
-            // 相机标定
-            auto criteria = cv::TermCriteria(
-                cv::TermCriteria::COUNT + cv::TermCriteria::EPS,
-                100,
-                DBL_EPSILON
-            ); // 默认迭代次数(30)有时会导致结果发散，故设为100
-            cv::calibrateCamera(
-                obj_points,
-                img_points,
-                img_size,
-                camera_matrix,
-                distort_coeffs,
-                rvecs,
-                tvecs,
-                cv::CALIB_FIX_K3,
-                criteria
-            ); // 由于视场角较小，不需要考虑k3
-
-            // 重投影误差
-            double error_sum = 0;
-            size_t total_points = 0;
-            for (size_t i = 0; i < obj_points.size(); i++) {
-                std::vector<cv::Point2f> reprojected_points;
-                cv::projectPoints(
-                    obj_points[i],
-                    rvecs[i],
-                    tvecs[i],
-                    camera_matrix,
-                    distort_coeffs,
-                    reprojected_points
-                );
-
-                total_points += reprojected_points.size();
-                for (size_t j = 0; j < reprojected_points.size(); j++)
-                    error_sum += cv::norm(img_points[i][j] - reprojected_points[j]);
-            }
-            auto error = error_sum / total_points;
-            std::cout << "Reprojection error: " << error << std::endl;
-
-            mode = Calibrated;
-
+            calibrate(); // 标定
             tm.stop();
             std::cout << "calibrateCamera Latency:" << tm.getTimeSec() << " s" << std::endl;
-            waitKey();
-        } else if (key == 'u' && mode == Calibrated) {
-            mode = Undistorting;
-        } else if (key == 's' && (mode == Calibrated || mode == Undistorting) ) { // 保存标定结果
+            
             saveCalibrationYAML(img_size, camera_matrix, distort_coeffs, "camera_calibration.yaml");
-        } else if (key == 27) {
-            return 0;
         }
 
-
-
+        // 可视化
+        // 可视化标定角点识别结果
+        cv::cvtColor(img_gray, img_gray, COLOR_GRAY2BGR);
+        if (found)
+            drawChessboardCorners(img_gray, paramer->boardSize, Mat(pixel_points), found);
+        // 绘制进度条
+        tracker->drawProgress(img_gray);
+        imshow("image", img_gray);
     }
 
     return 0;

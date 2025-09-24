@@ -51,6 +51,16 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
         yaml["HIK"]["pixel_format"].as<std::string>().c_str()
     );
 
+    // 获得图像格式
+    auto pixel_type = yaml["HIK"]["pixel_format"].as<std::string>();
+                const static std::unordered_map<std::string, cv::ColorConversionCodes> type_map = {
+                { "BayerGR8", cv::COLOR_BayerGR2RGB },
+                { "BayerRG8", cv::COLOR_BayerRG2RGB },
+                { "BayerGB8", cv::COLOR_BayerGB2RGB },
+                { "BayerBG8", cv::COLOR_BayerBG2RGB }
+            };
+    this->color_code_ = type_map.at(pixel_type);
+          
     // 开始采集图像
     nRet = MV_CC_StartGrabbing(camera_handle_);
     if (nRet != MV_OK) {
@@ -61,7 +71,10 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
         while (true) {
             MV_FRAME_OUT raw;
             nRet = MV_CC_GetImageBuffer(camera_handle_, &raw, 100);
-
+            if (nRet != MV_OK) {
+                std::cout <<std::hex<< "No image data: " << nRet << std::endl;
+                continue;
+            }
             cv::Mat img(
                 cv::Size(raw.stFrameInfo.nWidth, raw.stFrameInfo.nHeight),
                 CV_8U,
@@ -80,20 +93,14 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
             cvt_param.nDstBufferSize = img.total() * img.elemSize();
             cvt_param.enDstPixelType = PixelType_Gvsp_BGR8_Packed;
 
-            const auto& frame_info = raw.stFrameInfo;
-            auto pixel_type = frame_info.enPixelType;
             cv::Mat dst_image;
-            const static std::unordered_map<MvGvspPixelType, cv::ColorConversionCodes> type_map = {
-                { PixelType_Gvsp_BayerGR8, cv::COLOR_BayerGR2RGB },
-                { PixelType_Gvsp_BayerRG8, cv::COLOR_BayerRG2RGB },
-                { PixelType_Gvsp_BayerGB8, cv::COLOR_BayerGB2RGB },
-                { PixelType_Gvsp_BayerBG8, cv::COLOR_BayerBG2RGB }
-            };
-            cv::cvtColor(img, dst_image, type_map.at(pixel_type));
+            cv::cvtColor(img, dst_image,this->color_code_);
             img = dst_image;
-
-            MV_CC_FreeImageBuffer(camera_handle_, &raw);
             queue_.push(img);
+
+            // 将pFrame内的数据指针权限进行释放
+            MV_CC_FreeImageBuffer(camera_handle_, &raw);
+            
         }
     });
 }
@@ -110,7 +117,10 @@ Hik_Camera::~Hik_Camera() {
 
 cv::Mat Hik_Camera::get_image() {
     cv::Mat data;
+
     queue_.pop(data);
+
+
     return data;
 }
 
