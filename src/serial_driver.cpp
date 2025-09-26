@@ -1,6 +1,7 @@
 #include "serial_driver.hpp"
 #include "uart_transporter.hpp"
 #include <cstdint>
+#include <fmt/core.h>
 #include <iostream>
 #include <memory>
 
@@ -18,9 +19,9 @@ Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
     auto nNet = uart_transporter->open();
     fmt::print("open serial, state : {} \n", nNet);
 
-    queue_.pop(data_ahead_);
-    queue_.pop(data_behind_);
-
+    // queue_.pop(data_ahead_);
+    // queue_.pop(data_behind_);
+    
     daemon_thread_ = std::thread([this]() {
         while (true) {
             int recv_len = uart_transporter->read(tmp_buffer_, capacity);
@@ -35,14 +36,23 @@ Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
 
             auto timestamp = std::chrono::steady_clock::now();
 
-            auto roll = (int16_t)((tmp_buffer_[2] << 8) | tmp_buffer_[3]) / 1e3;
-            auto pitch = (int16_t)((tmp_buffer_[4] << 8) | tmp_buffer_[5]) / 1e3;
-            auto yaw = (int16_t)((tmp_buffer_[6] << 8) | tmp_buffer_[7]) / 1e3;
-            auto p = rpyToQuat(roll, pitch, yaw);
-
-            queue_.push({ p, timestamp });
+            auto pitch = (int16_t)((tmp_buffer_[2] << 8) | tmp_buffer_[3]) / 1e2;
+            auto roll = (int16_t)((tmp_buffer_[4] << 8) | tmp_buffer_[5]) / 1e2;
+            auto yaw = (int16_t)((tmp_buffer_[6] << 8) | tmp_buffer_[7]) / 1e2;
+            auto p = rpyToQuat(0.01, pitch, yaw);
+            
+            
+            // fmt::print("receve roll: {} 度, pitch: {} 度,yaw: {} 度 \n", roll, pitch, yaw);
+            queue_.push({ p, roll, pitch, yaw, timestamp });
         }
     });
+    fmt::print("open serial finish \n");
+
+}
+
+Serial_driver::~Serial_driver(){
+    if (daemon_thread_.joinable())
+        daemon_thread_.join();
 }
 
 Eigen::Quaterniond Serial_driver::read(std::chrono::steady_clock::time_point timestamp) {
@@ -68,7 +78,7 @@ Eigen::Quaterniond Serial_driver::read(std::chrono::steady_clock::time_point tim
     auto k = t_ac / t_ab;
     Eigen::Quaterniond q_c = q_a.slerp(k, q_b).normalized();
 
-    return q_c;
+    return q_a;
 }
 
 Eigen::Quaterniond Serial_driver::rpyToQuat(double roll, double pitch, double yaw) {

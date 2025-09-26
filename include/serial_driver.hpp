@@ -9,12 +9,16 @@
 #define capacity 16
 struct IMUData {
     Eigen::Quaterniond q;
+    double roll;
+    double pitch;
+    double yaw;
     std::chrono::steady_clock::time_point timestamp;
 };
 
 class Serial_driver {
 public:
     Serial_driver(const std::string& config_path);
+    ~Serial_driver();
     Eigen::Quaterniond read(std::chrono::steady_clock::time_point timestamp);
     Eigen::Quaterniond rpyToQuat(double roll, double pitch, double yaw);
 

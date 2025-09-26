@@ -1,5 +1,6 @@
 #include "calibrate.hpp"
 #include <fmt/core.h>
+#include <iostream>
 #include <opencv2/core/mat.hpp>
 
 namespace qd::calibrate {
@@ -18,7 +19,7 @@ Calibrate::Calibrate(const std::string& config_path): paramer(config_path) {
     }
 }
 
-void Calibrate::collect_camera(Mat& img) {
+bool Calibrate::collect_camera(Mat& img) {
     img_size = img.size();
 
     // 查找标定点 pixel_points
@@ -44,8 +45,8 @@ void Calibrate::collect_camera(Mat& img) {
     putText(img, text, Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
 
     // 手眼标定需要
-    if (this->distort_coeffs.empty() && (!found)) {
-        return;
+    if (this->distort_coeffs.empty() || !found) {
+        return false;
     }
 
     Mat rvec, tvec;
@@ -61,6 +62,8 @@ void Calibrate::collect_camera(Mat& img) {
     );
     this->rvecs.push_back(rvec);
     this->tvecs.push_back(tvec);
+
+    return true;
 }
 
 void Calibrate::calibrate_camera() {
@@ -280,35 +283,39 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q) {
     // 计算云台的欧拉角
     Eigen::Matrix3d R_gimbal2world = q.toRotationMatrix();
 
-    collect_camera(img);
+    auto found = collect_camera(img);
 
     cv::Mat t_gimbal2world = (cv::Mat_<double>(3, 1) << 0, 0, 0);
     cv::Mat R_gimbal2world_cv;
     cv::eigen2cv(R_gimbal2world, R_gimbal2world_cv);
 
-    this->R_gimbal2world_list.emplace_back(R_gimbal2world_cv);
-    this->t_gimbal2world_list.emplace_back(t_gimbal2world);
+    if (found) {
+        this->R_gimbal2world_list.emplace_back(R_gimbal2world_cv);
+        this->t_gimbal2world_list.emplace_back(t_gimbal2world);
+    }
 
     // 可视化
-    Eigen::Vector3d rpy = q.toRotationMatrix().eulerAngles(0, 1, 2);
+    // Eigen::Vector3d rpy = q.toRotationMatrix().eulerAngles(0, 1, 2);
+    Eigen::Vector3d rpy = eulers(q, 0, 1, 2);
+    std::cout << " 解包q: "<< rpy*57.3 << std::endl;
     // yaw
     {
         std::ostringstream oss;
-        oss << "yaw   " << std::fixed << std::setprecision(2) << rpy[2];
+        oss << "yaw   " << std::fixed << std::setprecision(2) << rpy[2]*57.3;
         cv::putText(img, oss.str(), { 40, 40 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
     }
 
     // pitch
     {
         std::ostringstream oss;
-        oss << "pitch " << std::fixed << std::setprecision(2) << rpy[1];
+        oss << "pitch " << std::fixed << std::setprecision(2) << rpy[1]*57.3;
         cv::putText(img, oss.str(), { 40, 80 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
     }
 
     // roll
     {
         std::ostringstream oss;
-        oss << "roll  " << std::fixed << std::setprecision(2) << rpy[0];
+        oss << "roll  " << std::fixed << std::setprecision(2) << rpy[0]*57.3;
         cv::putText(img, oss.str(), { 40, 120 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
     }
 }
@@ -378,5 +385,12 @@ void Calibrate::print_yaml(
 
     fmt::print("\n{}\n", result.c_str());
 }
+
+
+
+
+
+
+
 
 } // namespace qd::calibrate

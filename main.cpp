@@ -4,6 +4,7 @@
 #include "image_reader.hpp"
 #include "serial_driver.hpp"
 #include "uvc_camera.hpp"
+#include <fmt/core.h>
 #include <memory>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
@@ -56,19 +57,23 @@ int main(int argc, char* argv[]) {
     auto yaml = YAML::LoadFile(config_path);
     bool enable_handeye = yaml["enable_handeye"].as<bool>();
     std::unique_ptr<Serial_driver> protocol_;
+
     if (enable_handeye) {
         protocol_ = std::make_unique<Serial_driver>(config_path);
     }
 
-    namedWindow("image", WINDOW_NORMAL);
+    namedWindow("enter c to calibrate", WINDOW_NORMAL);
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
     while (true) {
         // 获取图像
         Mat img;
+
         if (enable_handeye) {
             device->read(img, timestamp);
+
             q = protocol_->read(timestamp);
+
         } else {
             img = device->get_image();
         }
