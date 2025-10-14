@@ -4,6 +4,12 @@
 
 使用方法：先修改配置，然后运行标定程序，在标定图片数量达到预期时后 <kbd>c</kbd> 开始标定
 
+## 依赖
+
+```bash
+sudo apt install cmake libopencv-dev libyaml-cpp-dev libfmt-dev libeigen3-dev
+```
+
 ## 配置
 
 修改 [calibration.yaml](config/calibration.yaml) 里的信息
