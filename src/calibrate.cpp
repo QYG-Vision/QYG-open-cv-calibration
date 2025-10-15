@@ -162,6 +162,9 @@ vector<Point3f> Calibrate::calcChessboardCorners(std::vector<cv::Point2f>& pixel
     return corners;
 }
 
+/**
+    @brief 查找标定点
+*/
 bool Calibrate::find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pixel_points) {
     Mat img_gray;
     cv::cvtColor(img, img_gray, COLOR_BGR2GRAY);
@@ -171,8 +174,8 @@ bool Calibrate::find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pi
             found = findChessboardCornersSB(
                 img_gray,
                 paramer.boardSize,
-                pixel_points
-                // CALIB_CB_EXHAUSTIVE + cv::CALIB_CB_ACCURACY // 精度高flags，但是慢，默认的会快点
+                pixel_points,
+                CALIB_CB_EXHAUSTIVE + cv::CALIB_CB_ACCURACY // 精度高flags，但是慢，默认的会快点
             );
             break;
         case CIRCLES_GRID:

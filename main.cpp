@@ -62,30 +62,30 @@ int main(int argc, char* argv[]) {
         protocol_ = std::make_unique<Serial_driver>(config_path);
     }
 
-    namedWindow("enter c to calibrate", WINDOW_NORMAL);
+    namedWindow("按 c 开始标定", WINDOW_NORMAL);
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
     while (true) {
-        // 获取图像
+        // 获取图像和串口数据
         Mat img;
-
+        device->read(img, timestamp);
         if (enable_handeye) {
-            device->read(img, timestamp);
-
             q = protocol_->read(timestamp);
-
-        } else {
-            img = device->get_image();
-        }
-
+        } 
+        // 检查图像
         if (img.empty() && !enable_handeye) {
             cout << "image is empty" << endl;
             calibrate_.calibrate_camera();
             break;
         }
 
+        cv::Mat img_back;
         if (enable_handeye) {
-            calibrate_.collect_handeye(img, q);
+            img_back = img.clone();
+            std::vector<Point2f> pixel_points;
+            bool found = calibrate_.find_Chessboard(img, pixel_points);
+            drawChessboardCorners(img, calibrate_.paramer.boardSize, Mat(pixel_points), found);
+            
         } else {
             calibrate_.collect_camera(img);
         }
@@ -98,11 +98,14 @@ int main(int argc, char* argv[]) {
                 calibrate_.calibrate_camera();
             }
             waitKey();
-        } else if (key == 27) {
+        } else if (key == 's' && enable_handeye) {
+            calibrate_.collect_handeye(img_back, q);
+        }
+        else if (key == 27) {
             break;
         }
 
-        imshow("enter c to calibrate", img);
+        imshow("按 c 开始标定", img);
     }
 
     return 0;
