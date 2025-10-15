@@ -297,6 +297,9 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q) {
         this->t_gimbal2world_list.emplace_back(t_gimbal2world);
     }
 
+}
+
+bool Calibrate::display_rpy(cv::Mat& img, const Eigen::Quaterniond& q){
     // 可视化
     // Eigen::Vector3d rpy = q.toRotationMatrix().eulerAngles(0, 1, 2);
     Eigen::Vector3d rpy = eulers(q, 0, 1, 2);
@@ -321,6 +324,8 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q) {
         oss << "roll  " << std::fixed << std::setprecision(2) << rpy[0]*57.3;
         cv::putText(img, oss.str(), { 40, 120 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
     }
+
+    return true;
 }
 
 void Calibrate::calibrate_handeye() {

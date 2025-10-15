@@ -71,6 +71,7 @@ int main(int argc, char* argv[]) {
         device->read(img, timestamp);
         if (enable_handeye) {
             q = protocol_->read(timestamp);
+            calibrate_.display_rpy(img, q);
         } 
         // 检查图像
         if (img.empty() && !enable_handeye) {

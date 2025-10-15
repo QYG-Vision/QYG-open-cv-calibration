@@ -58,6 +58,7 @@ public:
     vector<Point3f> calcChessboardCorners(std::vector<cv::Point2f>& pixel_points);
     bool find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pixel_points);
 
+    bool display_rpy(cv::Mat& img, const Eigen::Quaterniond& q);
 private:
     void saveCalibrationYAML(
         const cv::Size& image_size,
