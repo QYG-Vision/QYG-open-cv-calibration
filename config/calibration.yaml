@@ -1,5 +1,7 @@
 # 读取图像的设备，有 HIK 、 UVC 、 IMG 三种模式（海康相机，UVC协议的USB相机，图片）
 device: HIK
+# 是否启用手眼标定
+enable_handeye: false
 # 标定板类型 棋盘格： chessboard 对称圆： circles 非对称圆： acircles
 pattern: chessboard
 pattern_rows: 8 # 标定板行数（内角点数）
@@ -8,8 +10,8 @@ square_size: 35  # 标定板方格边长，单位：毫米
 HIK:
   enable_frame_rate: false  # 是否锁帧
   frame_rate: 200           # 锁帧时的帧率
-  exposure_time: 16000       # 曝光时间，单位：微秒
-  gain: 1.0                # 增益
+  exposure_time: 10000       # 曝光时间，单位：微秒
+  gain: 16.0                # 增益
   adc_bit_depth: ADCBitDepth_8  # ADC位深，8或10
   pixel_format: BayerRG8    
 UVC:
@@ -22,8 +24,7 @@ UVC:
 IMG:
   images_path: /home/qidian/images # 图像路径
 
-# 手眼标定
-enable_handeye: true
+# 手眼标定参数
 camera_matrix: [2355.1659688296108, 0, 713.61191580030959, 0, 2354.428871359376, 560.24669585399431, 0, 0, 1]
 distort_coeffs: [-0.065563597611780655, 0.11276523717486293, -3.6033937230756571e-05, 0.00037758454467663272, 0]
 Serial:
