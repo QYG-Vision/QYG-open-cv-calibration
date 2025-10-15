@@ -11,10 +11,6 @@
 namespace qd::Device {
 
 class Hik_Camera: public Device {
-    struct CameraData {
-        cv::Mat img;
-        std::chrono::steady_clock::time_point timestamp;
-    };
 
 public:
     Hik_Camera(const std::string& config_path);
