@@ -1,4 +1,5 @@
 #include "calibrate.hpp"
+#include <cmath>
 #include <fmt/core.h>
 #include <iostream>
 #include <opencv2/core/mat.hpp>
@@ -302,26 +303,26 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q) {
 bool Calibrate::display_rpy(cv::Mat& img, const Eigen::Quaterniond& q){
     // 可视化
     // Eigen::Vector3d rpy = q.toRotationMatrix().eulerAngles(0, 1, 2);
-    Eigen::Vector3d rpy = eulers(q, 0, 1, 2);
-    std::cout << " 解包q: "<< rpy*57.3 << std::endl;
+    Eigen::Vector3d rpy = eulers(q, 0, 1, 2) * 180 / M_PI;
+    std::cout << " 解包q: "<< rpy << std::endl;
     // yaw
     {
         std::ostringstream oss;
-        oss << "yaw   " << std::fixed << std::setprecision(2) << rpy[2]*57.3;
+        oss << "yaw   " << std::fixed << std::setprecision(2) << rpy[2];
         cv::putText(img, oss.str(), { 40, 40 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
     }
 
     // pitch
     {
         std::ostringstream oss;
-        oss << "pitch " << std::fixed << std::setprecision(2) << rpy[1]*57.3;
+        oss << "pitch " << std::fixed << std::setprecision(2) << rpy[1];
         cv::putText(img, oss.str(), { 40, 80 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
     }
 
     // roll
     {
         std::ostringstream oss;
-        oss << "roll  " << std::fixed << std::setprecision(2) << rpy[0]*57.3;
+        oss << "roll  " << std::fixed << std::setprecision(2) << rpy[0];
         cv::putText(img, oss.str(), { 40, 120 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
     }
 

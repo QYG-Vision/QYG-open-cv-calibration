@@ -1,5 +1,6 @@
 #include "serial_driver.hpp"
 #include "uart_transporter.hpp"
+#include <cmath>
 #include <cstdint>
 #include <fmt/core.h>
 #include <iostream>
@@ -83,9 +84,9 @@ Eigen::Quaterniond Serial_driver::read(std::chrono::steady_clock::time_point tim
 
 Eigen::Quaterniond Serial_driver::rpyToQuat(double roll, double pitch, double yaw) {
     // 转弧度
-    roll = roll / 57.3;
-    pitch = pitch / 57.3;
-    yaw = yaw / 57.3;
+    roll = roll * M_PI / 180;
+    pitch = pitch * M_PI / 180;
+    yaw = yaw * M_PI / 180;
     
     Eigen::AngleAxisd rollAngle(roll, Eigen::Vector3d::UnitX());
     Eigen::AngleAxisd pitchAngle(pitch, Eigen::Vector3d::UnitY());
