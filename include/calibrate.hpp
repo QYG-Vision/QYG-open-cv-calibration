@@ -71,6 +71,9 @@ private:
         const Eigen::Vector3d& rpy
     );
 
+public:
+    Paramer paramer;
+    
 private:
     Size img_size;
 
@@ -85,7 +88,7 @@ private:
 
     cv::TickMeter tm; // 延迟计时器
     int collected_count = 0; // 已采集的标定图像数量
-    Paramer paramer;
+    
 };
 
 static double limit_rad(double angle)
