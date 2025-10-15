@@ -28,4 +28,8 @@ cv::Mat Image_Reader::get_image() {
     return data;
 }
 
+void Image_Reader::read(cv::Mat& img, std::chrono::steady_clock::time_point& timestamp){
+    img = get_image();
+
+}
 } // namespace qd::Device
