@@ -82,15 +82,17 @@ int main(int argc, char* argv[]) {
 
         cv::Mat img_back;
         if (enable_handeye) {
+            // calibrate_.collect_camera(img,false);
             img_back = img.clone();
-            std::vector<Point2f> pixel_points;
-            bool found = calibrate_.find_Chessboard(img, pixel_points);
-            drawChessboardCorners(img, calibrate_.paramer.boardSize, Mat(pixel_points), found);
-            
+
+            calibrate_.collect_handeye(img, q);
+            // calibrate_.collect_handeye(img, q, true);
+
         } else {
             calibrate_.collect_camera(img);
         }
 
+        imshow("按 c 开始标定", img);
         int key = waitKey(10);
         if (key == 'c') {
             if (enable_handeye) {
@@ -98,15 +100,20 @@ int main(int argc, char* argv[]) {
             } else {
                 calibrate_.calibrate_camera();
             }
-            waitKey();
+
+            cv::destroyAllWindows();
+            return 1;
         } else if (key == 's' && enable_handeye) {
-            calibrate_.collect_handeye(img_back, q);
+            
+            calibrate_.collect_handeye(img_back, q, true);
+            
         }
         else if (key == 27) {
             break;
         }
 
-        imshow("按 c 开始标定", img);
+        
+
     }
 
     return 0;

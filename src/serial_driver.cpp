@@ -37,10 +37,10 @@ Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
 
             auto timestamp = std::chrono::steady_clock::now();
 
-            auto pitch = (int16_t)((tmp_buffer_[2] << 8) | tmp_buffer_[3]) / 1e2;
-            auto roll = (int16_t)((tmp_buffer_[4] << 8) | tmp_buffer_[5]) / 1e2;
+            auto roll = (int16_t)((tmp_buffer_[2] << 8) | tmp_buffer_[3]) / 1e2;
+            auto pitch = (int16_t)((tmp_buffer_[4] << 8) | tmp_buffer_[5]) / 1e2;
             auto yaw = (int16_t)((tmp_buffer_[6] << 8) | tmp_buffer_[7]) / 1e2;
-            auto p = rpyToQuat(0.01, pitch, yaw);
+            auto p = rpyToQuat(roll, pitch, yaw);
             
             
             // fmt::print("receve roll: {} 度, pitch: {} 度,yaw: {} 度 \n", roll, pitch, yaw);
@@ -95,4 +95,6 @@ Eigen::Quaterniond Serial_driver::rpyToQuat(double roll, double pitch, double ya
     // 注意顺序：Z * Y * X，对应 yaw-pitch-roll
     Eigen::Quaterniond q = yawAngle * pitchAngle * rollAngle;
     return q.normalized();
+
+
 }

@@ -10,6 +10,9 @@
 #include <yaml-cpp/yaml.h>
 #include <fmt/format.h>
 
+#define IN
+#define OUT
+
 namespace qd::calibrate {
 
 using namespace cv;
@@ -49,8 +52,9 @@ class Calibrate {
 public:
     Calibrate(const std::string& config_path);
 
-    bool collect_camera(Mat& img);
-    void collect_handeye(Mat& img, const Eigen::Quaterniond& q);
+    bool collect_camera(Mat& img, bool enable_collect = true);
+    bool collect_camera(IN Mat& img, OUT std::vector<Point2f>& pixel_points, OUT vector<Point3f>& object_points);
+    void collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool enable_collect = false);
 
     void calibrate_camera();
     void calibrate_handeye();
@@ -158,6 +162,12 @@ static Eigen::Vector3d eulers(Eigen::Quaterniond q, int axis0, int axis1, int ax
   if (!extrinsic) std::swap(eulers[0], eulers[2]);
 
   return eulers;
+}
+
+static Eigen::Vector3d eulers(Eigen::Matrix3d R, int axis0, int axis1, int axis2, bool extrinsic)
+{
+  Eigen::Quaterniond q(R);
+  return eulers(q, axis0, axis1, axis2, extrinsic);
 }
 
 } // namespace qd::calibrate

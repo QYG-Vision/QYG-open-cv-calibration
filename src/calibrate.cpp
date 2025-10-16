@@ -20,7 +20,7 @@ Calibrate::Calibrate(const std::string& config_path): paramer(config_path) {
     }
 }
 
-bool Calibrate::collect_camera(Mat& img) {
+bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
     img_size = img.size();
 
     // 查找标定点 pixel_points
@@ -34,9 +34,11 @@ bool Calibrate::collect_camera(Mat& img) {
         object_points[paramer.boardSize.width - 1].x =
             object_points[0].x + paramer.grid_width; // 右上角点修正
 
-        this->obj_points.push_back(object_points);
-        this->img_points.push_back(pixel_points);
-        this->collected_count++;
+        if (enable_collect) {
+            this->obj_points.push_back(object_points);
+            this->img_points.push_back(pixel_points);
+            this->collected_count++;
+        }
     }
 
     // 在图像上绘制并显示角点
@@ -51,7 +53,7 @@ bool Calibrate::collect_camera(Mat& img) {
     }
 
     Mat rvec, tvec;
-    cv::solvePnP(
+    auto rNet = cv::solvePnP(
         object_points,
         pixel_points,
         this->camera_matrix,
@@ -61,10 +63,37 @@ bool Calibrate::collect_camera(Mat& img) {
         false,
         cv::SOLVEPNP_IPPE
     );
-    this->rvecs.push_back(rvec);
-    this->tvecs.push_back(tvec);
+
+    if (enable_collect && rNet != 0) {
+        this->rvecs.push_back(rvec);
+        this->tvecs.push_back(tvec);
+    } else {
+        fmt::print("PnP failed!");
+    }
 
     return true;
+}
+
+bool Calibrate::collect_camera(
+    IN Mat& img,
+    OUT std::vector<Point2f>& pixel_points,
+    OUT vector<Point3f>& object_points
+) {
+    img_size = img.size();
+
+    // 查找标定点 pixel_points
+    bool found = find_Chessboard(img, pixel_points);
+
+    if (found) {
+        // 获得 pixel_points 对应的 object_points
+        object_points = calcChessboardCorners(pixel_points);
+        object_points[paramer.boardSize.width - 1].x =
+            object_points[0].x + paramer.grid_width; // 右上角点修正
+
+        return true;
+    }
+
+    return false;
 }
 
 void Calibrate::calibrate_camera() {
@@ -175,8 +204,8 @@ bool Calibrate::find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pi
             found = findChessboardCornersSB(
                 img_gray,
                 paramer.boardSize,
-                pixel_points,
-                CALIB_CB_EXHAUSTIVE + cv::CALIB_CB_ACCURACY // 精度高flags，但是慢，默认的会快点
+                pixel_points
+                // , CALIB_CB_EXHAUSTIVE + cv::CALIB_CB_ACCURACY // 精度高flags，但是慢，默认的会快点
             );
             break;
         case CIRCLES_GRID:
@@ -283,46 +312,85 @@ void Calibrate::saveCalibrationYAML(
 /**
     @brief 手眼标定收集数据
 */
-void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q) {
-    // 计算云台的欧拉角
-    Eigen::Matrix3d R_gimbal2world = q.toRotationMatrix();
+void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool enable_collect) {
+    // 获得标定点
+    std::vector<Point2f> pixel_points;
+    vector<Point3f> object_points;
+    auto found = collect_camera(img, pixel_points, object_points);
 
-    auto found = collect_camera(img);
+    // PnP
+    Mat rvec, tvec;
+    bool rNet;
+    if (found){
+        rNet = cv::solvePnP(
+                object_points,
+                pixel_points,
+                this->camera_matrix,
+                this->distort_coeffs,
+                rvec,
+                tvec,
+                false,
+                cv::SOLVEPNP_IPPE
+        );
+    }
+    
 
-    cv::Mat t_gimbal2world = (cv::Mat_<double>(3, 1) << 0, 0, 0);
-    cv::Mat R_gimbal2world_cv;
-    cv::eigen2cv(R_gimbal2world, R_gimbal2world_cv);
+    if (found && rNet && enable_collect) {
+        this->obj_points.push_back(object_points);
+        this->img_points.push_back(pixel_points);
+        this->rvecs.push_back(rvec);
+        this->tvecs.push_back(tvec);
 
-    if (found) {
+        // 计算云台的欧拉角
+        Eigen::Matrix3d R_gimbal2world = q.toRotationMatrix();
+        cv::Mat t_gimbal2world = (cv::Mat_<double>(3, 1) << 0, 0, 0);
+        cv::Mat R_gimbal2world_cv;
+        cv::eigen2cv(R_gimbal2world, R_gimbal2world_cv);
+
         this->R_gimbal2world_list.emplace_back(R_gimbal2world_cv);
         this->t_gimbal2world_list.emplace_back(t_gimbal2world);
+
+        //计数
+        this->collected_count++;
+
+        //debug
+        std::cout << "gimbal rpy: " << eulers(q, 2, 1, 0).transpose() * 180 / M_PI << std::endl;
+        std::cout << "camera tvec: " << tvec.t() << std::endl;
+   
+
     }
 
+    // 可视化
+    // 在图像上绘制并显示角点
+    drawChessboardCorners(img, this->paramer.boardSize, Mat(pixel_points), found);
+    // 在图像上显示已采集的数量
+    std::string text = "Collected: " + std::to_string(this->collected_count);
+    putText(img, text, Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
 }
 
-bool Calibrate::display_rpy(cv::Mat& img, const Eigen::Quaterniond& q){
+bool Calibrate::display_rpy(cv::Mat& img, const Eigen::Quaterniond& q) {
     // 可视化
-    // Eigen::Vector3d rpy = q.toRotationMatrix().eulerAngles(0, 1, 2);
-    Eigen::Vector3d rpy = eulers(q, 0, 1, 2) * 180 / M_PI;
-    std::cout << " 解包q: "<< rpy << std::endl;
+    // Eigen::Vector3d rpy = q.toRotationMatrix().eulerAngles(0, 1, 2)* 180 / M_PI;
+    Eigen::Vector3d ypr = eulers(q, 2, 1, 0) * 180 / M_PI;
+    // std::cout << " 解包q: "<< rpy << std::endl;
     // yaw
     {
         std::ostringstream oss;
-        oss << "yaw   " << std::fixed << std::setprecision(2) << rpy[2];
+        oss << "yaw   " << std::fixed << std::setprecision(2) << ypr[0];
         cv::putText(img, oss.str(), { 40, 40 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
     }
 
     // pitch
     {
         std::ostringstream oss;
-        oss << "pitch " << std::fixed << std::setprecision(2) << rpy[1];
+        oss << "pitch " << std::fixed << std::setprecision(2) << ypr[1];
         cv::putText(img, oss.str(), { 40, 80 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
     }
 
     // roll
     {
         std::ostringstream oss;
-        oss << "roll  " << std::fixed << std::setprecision(2) << rpy[0];
+        oss << "roll  " << std::fixed << std::setprecision(2) << ypr[2];
         cv::putText(img, oss.str(), { 40, 120 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 0, 0, 255 }, 2);
     }
 
@@ -353,7 +421,15 @@ void Calibrate::calibrate_handeye() {
     cv::cv2eigen(R_camera2gimbal, R_camera2gimbal_eigen);
     Eigen::Matrix3d R_gimbal2ideal { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } };
     Eigen::Matrix3d R_camera2ideal = R_gimbal2ideal * R_camera2gimbal_eigen;
-    Eigen::Vector3d rpy = R_camera2ideal.eulerAngles(0, 1, 2) * 57.3; // degree
+    Eigen::Vector3d rpy = eulers(Eigen::Quaterniond{R_camera2ideal}, 1, 0, 2) * 180 /M_PI; // degree
+
+    // std::cout << "rpy[1,0,2]" << eulers(Eigen::Quaterniond{R_camera2ideal}, 1, 0, 2) * 180 /M_PI << std::endl;
+    // std::cout << "rpy[1,2,0]" << eulers(Eigen::Quaterniond{R_camera2ideal}, 1, 2, 0) * 180 /M_PI << std::endl;
+    // std::cout << "rpy[0,1,2]" << eulers(Eigen::Quaterniond{R_camera2ideal}, 0, 1, 2) * 180 /M_PI << std::endl;
+    // std::cout << "rpy[2,1,0]" << eulers(Eigen::Quaterniond{R_camera2ideal}, 2, 1, 0) * 180 /M_PI << std::endl;
+    // std::cout << "rpy[0,2,1]" << eulers(Eigen::Quaterniond{R_camera2ideal}, 0, 2, 1) * 180 /M_PI << std::endl;
+    // std::cout << "rpy[2,0,1]" << eulers(Eigen::Quaterniond{R_camera2ideal}, 2, 0, 1) * 180 /M_PI << std::endl;
+
 
     // 输出yaml
     print_yaml(R_camera2gimbal, t_camera2gimbal, rpy);
@@ -394,12 +470,5 @@ void Calibrate::print_yaml(
 
     fmt::print("\n{}\n", result.c_str());
 }
-
-
-
-
-
-
-
 
 } // namespace qd::calibrate

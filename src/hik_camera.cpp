@@ -70,7 +70,7 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
     daemon_thread_ = std::thread([this]() {
         while (true) {
             MV_FRAME_OUT raw;
-            nRet = MV_CC_GetImageBuffer(camera_handle_, &raw, 100);
+            nRet = MV_CC_GetImageBuffer(camera_handle_, &raw, 1000);
             auto timestamp = std::chrono::steady_clock::now();
             if (nRet != MV_OK) {
                 std::cout << std::hex << "No image data: " << nRet << std::endl;
@@ -83,7 +83,7 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
             );
 
             
-            unsigned char *pDataForRGB = (unsigned char*)malloc(raw.stFrameInfo.nExtendWidth * raw.stFrameInfo.nExtendHeight * 4 + 2048);
+            // unsigned char *pDataForRGB = (unsigned char*)malloc(raw.stFrameInfo.nExtendWidth * raw.stFrameInfo.nExtendHeight * 4 + 2048);
             MV_CC_PIXEL_CONVERT_PARAM cvt_param;
             cvt_param.nWidth = raw.stFrameInfo.nWidth;
             cvt_param.nHeight = raw.stFrameInfo.nHeight;
@@ -92,18 +92,18 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
             cvt_param.nSrcDataLen = raw.stFrameInfo.nFrameLen;
             cvt_param.enSrcPixelType = raw.stFrameInfo.enPixelType;
 
-            // cvt_param.pDstBuffer = img.data;
-            cvt_param.pDstBuffer = pDataForRGB;
+            cvt_param.pDstBuffer = img.data;
+            // cvt_param.pDstBuffer = pDataForRGB;
             cvt_param.nDstBufferSize = raw.stFrameInfo.nExtendWidth * raw.stFrameInfo.nExtendHeight * 4 + 2048;
             cvt_param.enDstPixelType = PixelType_Gvsp_BGR8_Packed;
-            nRet = MV_CC_ConvertPixelType(camera_handle_, &cvt_param);
-            cv::Mat dst_image(
-                cv::Size(raw.stFrameInfo.nWidth, raw.stFrameInfo.nHeight),
-                CV_8UC3,
-                pDataForRGB
-            );
-            // cv::Mat dst_image;
-            // cv::cvtColor(img, dst_image, this->color_code_);
+            // nRet = MV_CC_ConvertPixelType(camera_handle_, &cvt_param);
+            // cv::Mat dst_image(
+            //     cv::Size(raw.stFrameInfo.nWidth, raw.stFrameInfo.nHeight),
+            //     CV_8UC3,
+            //     pDataForRGB
+            // );
+            cv::Mat dst_image;
+            cv::cvtColor(img, dst_image, this->color_code_);
             img = dst_image;
             queue_.push({ img, timestamp });
 
