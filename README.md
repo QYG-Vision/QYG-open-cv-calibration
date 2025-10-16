@@ -22,3 +22,4 @@ make -C build
 ./build/calibration
 ```
 
+> 手眼标定程序需要按 <kdb>s<ked/> 收集标定信息，标定时标定板和云台基坐标不能动
