@@ -1,4 +1,5 @@
 #include "calibrate.hpp"
+#include <chrono>
 #include <cmath>
 #include <fmt/core.h>
 #include <iostream>
@@ -14,7 +15,9 @@ Calibrate::Calibrate(const std::string& config_path): paramer(config_path) {
         this->camera_matrix = cv::Matx33d(camera_matrix_data.data());
         this->distort_coeffs = cv::Mat(distort_coeffs_data);
 
-        // debug
+        // debug his->camera_matrix and his->distort_coeffs
+        cout << "Loaded camera matrix: \n" << this->camera_matrix << endl;
+        cout << "Loaded distort coeffs: \n" << this->distort_coeffs << endl;
         fmt::print("import camera_matrix_data: {} \n", fmt::join(camera_matrix_data, ", "));
         fmt::print("import distort_coeffs_data: {} \n", fmt::join(distort_coeffs_data, ", "));
     }
@@ -121,7 +124,8 @@ void Calibrate::calibrate_camera() {
         distort_coeffs,
         rvecs,
         tvecs,
-        cv::CALIB_FIX_K3,
+        // cv::CALIB_FIX_K3,
+        0,
         criteria
     ); // 由于视场角较小，不需要考虑k3
 
@@ -205,7 +209,7 @@ bool Calibrate::find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pi
                 img_gray,
                 paramer.boardSize,
                 pixel_points
-                // , CALIB_CB_EXHAUSTIVE + cv::CALIB_CB_ACCURACY // 精度高flags，但是慢，默认的会快点
+                , CALIB_CB_EXHAUSTIVE + cv::CALIB_CB_ACCURACY // 精度高flags，但是慢，默认的会快点
             );
             break;
         case CIRCLES_GRID:
@@ -356,6 +360,8 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
         //debug
         std::cout << "gimbal rpy: " << eulers(q, 2, 1, 0).transpose() * 180 / M_PI << std::endl;
         std::cout << "camera tvec: " << tvec.t() << std::endl;
+        std::cout << "object_points size: " << object_points.size() << std::endl;
+        std::cout << "pixel_points size: " << pixel_points.size() << std::endl;
    
 
     }
@@ -422,14 +428,6 @@ void Calibrate::calibrate_handeye() {
     Eigen::Matrix3d R_gimbal2ideal { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } };
     Eigen::Matrix3d R_camera2ideal = R_gimbal2ideal * R_camera2gimbal_eigen;
     Eigen::Vector3d rpy = eulers(Eigen::Quaterniond{R_camera2ideal}, 1, 0, 2) * 180 /M_PI; // degree
-
-    // std::cout << "rpy[1,0,2]" << eulers(Eigen::Quaterniond{R_camera2ideal}, 1, 0, 2) * 180 /M_PI << std::endl;
-    // std::cout << "rpy[1,2,0]" << eulers(Eigen::Quaterniond{R_camera2ideal}, 1, 2, 0) * 180 /M_PI << std::endl;
-    // std::cout << "rpy[0,1,2]" << eulers(Eigen::Quaterniond{R_camera2ideal}, 0, 1, 2) * 180 /M_PI << std::endl;
-    // std::cout << "rpy[2,1,0]" << eulers(Eigen::Quaterniond{R_camera2ideal}, 2, 1, 0) * 180 /M_PI << std::endl;
-    // std::cout << "rpy[0,2,1]" << eulers(Eigen::Quaterniond{R_camera2ideal}, 0, 2, 1) * 180 /M_PI << std::endl;
-    // std::cout << "rpy[2,0,1]" << eulers(Eigen::Quaterniond{R_camera2ideal}, 2, 0, 1) * 180 /M_PI << std::endl;
-
 
     // 输出yaml
     print_yaml(R_camera2gimbal, t_camera2gimbal, rpy);

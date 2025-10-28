@@ -17,11 +17,14 @@ Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
     fmt::print("import baud_rate: {} \n", baud_rate);
 
     uart_transporter = std::make_unique<UartTransporter>(port_name, baud_rate);
-    auto nNet = uart_transporter->open();
-    fmt::print("open serial, state : {} \n", nNet);
+    
+    while (!uart_transporter->open()) {
+        fmt::print("serial open failed, retrying... \n");
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
 
-    // queue_.pop(data_ahead_);
-    // queue_.pop(data_behind_);
+    // queue_.push(data_ahead_);
+    // queue_.push(data_behind_);
     
     daemon_thread_ = std::thread([this]() {
         while (true) {
@@ -61,6 +64,8 @@ Eigen::Quaterniond Serial_driver::read(std::chrono::steady_clock::time_point tim
         data_ahead_ = data_behind_;
 
     while (true) {
+        // std::cout << "waiting for imu data..." << std::endl;
+
         queue_.pop(data_behind_);
         if (data_behind_.timestamp > timestamp)
             break;

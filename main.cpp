@@ -65,6 +65,7 @@ int main(int argc, char* argv[]) {
     namedWindow("按 c 开始标定", WINDOW_NORMAL);
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
+    std::cout << "开始标定，按 'c' 键开始计算标定参数，按 's' 键采集手眼标定数据，按 'ESC' 键退出" << std::endl;
     while (true) {
         // 获取图像和串口数据
         Mat img;
@@ -102,7 +103,7 @@ int main(int argc, char* argv[]) {
             }
 
             cv::destroyAllWindows();
-            return 1;
+            return 0;
         } else if (key == 's' && enable_handeye) {
             
             calibrate_.collect_handeye(img_back, q, true);
