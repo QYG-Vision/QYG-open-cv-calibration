@@ -1,6 +1,7 @@
 #pragma once
 #include "device.hpp"
 #include "thread_safe_queue.hpp"
+#include <atomic>
 #include <opencv2/opencv.hpp>
 #include <string>
 #include <thread>
@@ -20,6 +21,7 @@ private:
     cv::Mat image;
     tools::ThreadSafeQueue<CameraData> queue_;
     std::thread daemon_thread_;
+    std::atomic<bool> running_{true};
 };
 
 } // namespace qd::Device

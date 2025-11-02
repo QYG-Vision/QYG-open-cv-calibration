@@ -68,13 +68,19 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
     }
 
     daemon_thread_ = std::thread([this]() {
-        while (true) {
+        while (running_) {
             MV_FRAME_OUT raw;
             nRet = MV_CC_GetImageBuffer(camera_handle_, &raw, 1000);
             auto timestamp = std::chrono::steady_clock::now();
             if (nRet != MV_OK) {
                 std::cout << std::hex << "No image data: " << nRet << std::endl;
                 continue;
+            }
+            if (!running_) {
+                if (nRet == MV_OK) {
+                    MV_CC_FreeImageBuffer(camera_handle_, &raw);
+                }
+                break;
             }
             cv::Mat img(
                 cv::Size(raw.stFrameInfo.nWidth, raw.stFrameInfo.nHeight),
@@ -114,13 +120,14 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
 }
 
 Hik_Camera::~Hik_Camera() {
-    if (daemon_thread_.joinable())
-        daemon_thread_.join();
+    running_ = false;
     if (camera_handle_) {
         MV_CC_StopGrabbing(camera_handle_);
         MV_CC_CloseDevice(camera_handle_);
         MV_CC_DestroyHandle(&camera_handle_);
     }
+    if (daemon_thread_.joinable())
+        daemon_thread_.join();
 }
 
 cv::Mat Hik_Camera::get_image() {

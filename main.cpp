@@ -77,8 +77,10 @@ int main(int argc, char* argv[]) {
         // 检查图像
         if (img.empty() && !enable_handeye) {
             cout << "image is empty" << endl;
-            calibrate_.calibrate_camera();
-            break;
+            if (calibrate_.calibrate_camera()) {
+                break;
+            }
+            continue;
         }
 
         cv::Mat img_back;
@@ -98,12 +100,16 @@ int main(int argc, char* argv[]) {
         if (key == 'c') {
             if (enable_handeye) {
                 calibrate_.calibrate_handeye();
+                cv::destroyAllWindows();
+                break;
             } else {
-                calibrate_.calibrate_camera();
+                if (calibrate_.calibrate_camera()) {
+                    cv::destroyAllWindows();
+                    break;
+                } else {
+                    std::cout << "请继续采集有效的标定图像后再次按 'c'。" << std::endl;
+                }
             }
-
-            cv::destroyAllWindows();
-            return 0;
         } else if (key == 's' && enable_handeye) {
             
             calibrate_.collect_handeye(img_back, q, true);
@@ -117,5 +123,8 @@ int main(int argc, char* argv[]) {
 
     }
 
+    protocol_.reset();
+    device.reset();
+    std::cout << "标定完成，程序退出" << std::endl;
     return 0;
 }

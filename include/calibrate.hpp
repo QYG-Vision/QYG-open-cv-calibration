@@ -1,14 +1,21 @@
 #pragma once
+// eigen
 #include <Eigen/Dense>
+// fmt
 #include <fmt/core.h>
+#include <fmt/format.h>
+// c++
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <chrono>
+// opencv
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/opencv.hpp>
 #include <sstream>
+// yaml-cpp
 #include <yaml-cpp/yaml.h>
-#include <fmt/format.h>
+
 
 #define IN
 #define OUT
@@ -56,7 +63,7 @@ public:
     bool collect_camera(IN Mat& img, OUT std::vector<Point2f>& pixel_points, OUT vector<Point3f>& object_points);
     void collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool enable_collect = false);
 
-    void calibrate_camera();
+    bool calibrate_camera();
     void calibrate_handeye();
 
     vector<Point3f> calcChessboardCorners(std::vector<cv::Point2f>& pixel_points);

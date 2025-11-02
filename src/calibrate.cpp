@@ -99,10 +99,10 @@ bool Calibrate::collect_camera(
     return false;
 }
 
-void Calibrate::calibrate_camera() {
+bool Calibrate::calibrate_camera() {
     if (obj_points.size() < 1) {
         std::cerr << "Not enough data for calibration. Need at least 1 valid image." << std::endl;
-        return;
+        return false;
     }
 
     std::cout << "Start calibrate_camera !!! " << std::endl;
@@ -164,6 +164,7 @@ void Calibrate::calibrate_camera() {
     obj_points.clear();
     img_points.clear();
     collected_count = 0;
+    return true;
 }
 /**
     @brief 计算标定板三维坐标

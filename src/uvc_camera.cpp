@@ -25,7 +25,7 @@ UVC_Camera::UVC_Camera(const std::string& config_path): queue_(1) {
 
     // 开线程获取图像
     daemon_thread_ = std::thread([this]() {
-        while (true) {
+        while (running_) {
             cv::Mat img;
             cap >> img; // Capture a new image frame
             auto timestamp = std::chrono::steady_clock::now();
@@ -39,6 +39,7 @@ UVC_Camera::UVC_Camera(const std::string& config_path): queue_(1) {
 }
 
 UVC_Camera::~UVC_Camera() {
+    running_ = false;
     if (daemon_thread_.joinable())
         daemon_thread_.join();
     if (cap.isOpened())
