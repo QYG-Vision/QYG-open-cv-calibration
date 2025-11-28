@@ -14,11 +14,11 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
     MV_CC_DEVICE_INFO_LIST device_list;
     nRet = MV_CC_EnumDevices(MV_USB_DEVICE, &device_list);
     if (nRet == MV_OK)
-        std::cout << std::hex << "Found camera count = " << device_list.nDeviceNum << std::endl;
+        std::cout << std::hex << "Found camera count = " << device_list.nDeviceNum << std::dec << std::endl;
     // 等待设备连接
     while (device_list.nDeviceNum == 0) {
         std::cout << "No camera found!" << std::endl;
-        std::cout << std::hex << "Enum state: " << nRet << std::endl;
+        std::cout << std::hex << "Enum state: " << nRet << std::dec << std::endl;
         cv::waitKey(1000);
         nRet = MV_CC_EnumDevices(MV_USB_DEVICE, &device_list);
     }
@@ -73,7 +73,7 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
             nRet = MV_CC_GetImageBuffer(camera_handle_, &raw, 1000);
             auto timestamp = std::chrono::steady_clock::now();
             if (nRet != MV_OK) {
-                std::cout << std::hex << "No image data: " << nRet << std::endl;
+                std::cout << std::hex << "No image data: " << nRet << std::dec << std::endl;
                 continue;
             }
             if (!running_) {
