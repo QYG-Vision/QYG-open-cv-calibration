@@ -326,19 +326,18 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
     // PnP
     Mat rvec, tvec;
     bool rNet;
-    if (found){
+    if (found) {
         rNet = cv::solvePnP(
-                object_points,
-                pixel_points,
-                this->camera_matrix,
-                this->distort_coeffs,
-                rvec,
-                tvec,
-                false,
-                cv::SOLVEPNP_IPPE
+            object_points,
+            pixel_points,
+            this->camera_matrix,
+            this->distort_coeffs,
+            rvec,
+            tvec,
+            false,
+            cv::SOLVEPNP_IPPE
         );
     }
-    
 
     if (found && rNet && enable_collect) {
         this->obj_points.push_back(object_points);
@@ -361,10 +360,8 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
         //debug
         std::cout << "gimbal rpy: " << eulers(q, 2, 1, 0).transpose() * 180 / M_PI << std::endl;
         std::cout << "camera tvec: " << tvec.t() << std::endl;
-        std::cout << "object_points size: " << object_points.size() << std::endl;
-        std::cout << "pixel_points size: " << pixel_points.size() << std::endl;
-   
-
+        Eigen::Vector3d tvec_vec(tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
+        std::cout << "norm: " << tvec_vec.norm() << std::endl;
     }
 
     // 可视化
@@ -428,10 +425,15 @@ void Calibrate::calibrate_handeye() {
     cv::cv2eigen(R_camera2gimbal, R_camera2gimbal_eigen);
     Eigen::Matrix3d R_gimbal2ideal { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } };
     Eigen::Matrix3d R_camera2ideal = R_gimbal2ideal * R_camera2gimbal_eigen;
-    Eigen::Vector3d rpy = eulers(Eigen::Quaterniond{R_camera2ideal}, 1, 0, 2) * 180 /M_PI; // degree
+    Eigen::Vector3d rpy =
+        eulers(Eigen::Quaterniond { R_camera2ideal }, 1, 0, 2) * 180 / M_PI; // degree
 
     // 输出yaml
     print_yaml(R_camera2gimbal, t_camera2gimbal, rpy);
+
+    Eigen::Matrix3d R_ideal2camera = R_camera2ideal.transpose();
+    rpy = eulers(Eigen::Quaterniond { R_ideal2camera }, 1, 0, 2) * 180 / M_PI; // degree
+    print_yaml(t_camera2gimbal, rpy);
 }
 
 void Calibrate::print_yaml(
@@ -454,12 +456,14 @@ void Calibrate::print_yaml(
     //   result << YAML::Value << YAML::Flow << R_gimbal2imubody_data;
     result << YAML::Newline;
     result << YAML::Newline;
-    result << YAML::Comment(fmt::format(
-        "相机同理想情况的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
-        rpy[2],
-        rpy[1],
-        rpy[0]
-    ));
+    result << YAML::Comment(
+        fmt::format(
+            "相机同理想情况的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
+            rpy[2],
+            rpy[1],
+            rpy[0]
+        )
+    );
     result << YAML::Key << "R_camera2gimbal";
     result << YAML::Value << YAML::Flow << R_camera2gimbal_data;
     result << YAML::Key << "t_camera2gimbal";
@@ -468,6 +472,54 @@ void Calibrate::print_yaml(
     result << YAML::EndMap;
 
     fmt::print("\n{}\n", result.c_str());
+}
+
+void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d& rpy) {
+    // 1. 格式化 xyz 字符串: "x y z"
+    std::stringstream ss_xyz;
+    ss_xyz << std::fixed << std::setprecision(6);
+    for (int i = 0; i < 3; ++i) {
+        ss_xyz << t_camera2gimbal.at<double>(i) << (i == 2 ? "" : " ");
+    }
+
+    // 2. 格式化 rpy 字符串: "yaw pitch roll" 
+    std::stringstream ss_rpy;
+    auto rpy_rad = rpy * M_PI / 180;
+    ss_rpy << std::fixed << std::setprecision(6); // 角度通常保留两位
+    ss_rpy << rpy_rad.z() << " " << rpy_rad.y() << " " << rpy_rad.x();
+
+    // 3. 构造注释内容
+    std::stringstream ss_comment;
+    ss_comment << "相机同理想情况的偏角: yaw" << rpy.z() << " pitch" << rpy.y() << " roll"
+               << rpy.x() << " degree";
+
+    // 4. 使用 Emitter 手写 YAML 以精确控制注释位置
+    YAML::Emitter out;
+    out << YAML::BeginMap;
+    out << YAML::Key << "odom2camera";
+    out << YAML::Value << YAML::BeginMap;
+
+    // 写入 xyz
+    out << YAML::Key << "xyz";
+    out << YAML::Value << "\"" + ss_xyz.str() + "\"";
+
+    // 写入带注释的 rpy
+    out << YAML::Newline;
+    out << YAML::Comment(
+        fmt::format(
+            "相机同理想情况的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree ",
+            rpy[2],
+            rpy[1],
+            rpy[0]
+        )
+    );
+    out << YAML::Key << "rpy";
+    out << YAML::Value << "\"" + ss_rpy.str() + "\"";
+
+    out << YAML::EndMap;
+    out << YAML::EndMap;
+
+    std::cout << out.c_str() << std::endl;
 }
 
 } // namespace qd::calibrate

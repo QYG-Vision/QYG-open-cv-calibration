@@ -82,6 +82,10 @@ private:
         const cv::Mat& t_camera2gimbal,
         const Eigen::Vector3d& rpy
     );
+    void print_yaml(
+        const cv::Mat& t_camera2gimbal,
+        const Eigen::Vector3d& rpy
+    );
 
 public:
     Paramer paramer;
