@@ -1,7 +1,5 @@
 # 读取图像的设备，有 HIK 、 UVC 、 IMG 三种模式（海康相机，UVC协议的USB相机，图片）
 device: HIK
-# 是否启用手眼标定
-enable_handeye: false
 # 标定板类型 棋盘格： chessboard 对称圆： circles 非对称圆： acircles
 pattern: chessboard
 pattern_rows: 8 # 标定板行数（内角点数）
@@ -24,9 +22,12 @@ UVC:
 IMG:
   images_path: /home/qidian/images # 图像路径
 
-# 手眼标定参数
-camera_matrix: [2355.1659688296108, 0, 713.61191580030959, 0, 2354.428871359376, 560.24669585399431, 0, 0, 1]
-distort_coeffs: [-0.065563597611780655, 0.11276523717486293, -3.6033937230756571e-05, 0.00037758454467663272, 0]
+# 手眼标定和重投影误差用到的相机参数
+camera_matrix: [2369.517706316392, 0, 734.8156447660090, 0, 2369.213940616253,560.3350034770036, 0, 0, 1]
+distort_coeffs: [-0.023281262112283, 0.091482806312295, -0.00, 0.0000, 0.00000]
+
+
+# 串口参数
 Serial:
-  port_name: /dev/ttyUSB0
+  port_name: /dev/ttyACM0
   baud_rate: 115200

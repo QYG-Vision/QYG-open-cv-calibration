@@ -31,4 +31,5 @@ private:
     std::unique_ptr<UartTransporter> uart_transporter;
     tools::ThreadSafeQueue<IMUData> queue_;
     std::thread daemon_thread_;
+    std::atomic<bool> running_{true};
 };

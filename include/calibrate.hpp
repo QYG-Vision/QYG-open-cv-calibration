@@ -59,7 +59,7 @@ class Calibrate {
 public:
     Calibrate(const std::string& config_path);
 
-    bool collect_camera(Mat& img, bool enable_collect = true);
+    bool collect_camera(Mat& img, bool enable_collect = false);
     bool collect_camera(IN Mat& img, OUT std::vector<Point2f>& pixel_points, OUT vector<Point3f>& object_points);
     void collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool enable_collect = false);
 
@@ -70,6 +70,13 @@ public:
     bool find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pixel_points);
 
     bool display_rpy(cv::Mat& img, const Eigen::Quaterniond& q);
+    void display_error(cv::Mat& img);
+    std::pair<double, std::vector<cv::Point2f>> validateCalibration(
+    const std::vector<cv::Point3f>& object_points,
+    const std::vector<cv::Point2f>& pixel_points,
+    const cv::Matx33d& camera_matrix,
+    const cv::Mat& distort_coeffs
+    );
 private:
     void saveCalibrationYAML(
         const cv::Size& image_size,

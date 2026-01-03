@@ -11,6 +11,7 @@ Image_Reader::Image_Reader(const std::string& config_path): index(0) {
     cv::glob(images_path + "/*.jpg", filenames); // 读取jpg文件
     cv::glob(images_path + "/*.png", filenames); // 读取png文件
     cv::glob(images_path + "/*.bmp", filenames); // 读取bmp文件
+    cv::glob(images_path + "/*.tif", filenames); // 读取tif文件
 }
 
 Image_Reader::~Image_Reader() {

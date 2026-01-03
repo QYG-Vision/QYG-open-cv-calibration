@@ -27,7 +27,7 @@ Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
     // queue_.push(data_behind_);
     
     daemon_thread_ = std::thread([this]() {
-        while (true) {
+        while (running_) {
             int recv_len = uart_transporter->read(tmp_buffer_, capacity);
             // 检查长度
             if (recv_len != capacity) {
@@ -55,6 +55,7 @@ Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
 }
 
 Serial_driver::~Serial_driver(){
+    running_ = false;
     if (daemon_thread_.joinable())
         daemon_thread_.join();
 }

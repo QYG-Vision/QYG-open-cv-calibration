@@ -9,18 +9,15 @@ namespace qd::calibrate {
 
 Calibrate::Calibrate(const std::string& config_path): paramer(config_path) {
     auto yaml = YAML::LoadFile(config_path);
-    if (yaml["enable_handeye"].as<bool>()) {
-        auto camera_matrix_data = yaml["camera_matrix"].as<std::vector<double>>();
-        auto distort_coeffs_data = yaml["distort_coeffs"].as<std::vector<double>>();
-        this->camera_matrix = cv::Matx33d(camera_matrix_data.data());
-        this->distort_coeffs = cv::Mat(distort_coeffs_data);
 
-        // debug his->camera_matrix and his->distort_coeffs
-        cout << "Loaded camera matrix: \n" << this->camera_matrix << endl;
-        cout << "Loaded distort coeffs: \n" << this->distort_coeffs << endl;
-        fmt::print("import camera_matrix_data: {} \n", fmt::join(camera_matrix_data, ", "));
-        fmt::print("import distort_coeffs_data: {} \n", fmt::join(distort_coeffs_data, ", "));
-    }
+    auto camera_matrix_data = yaml["camera_matrix"].as<std::vector<double>>();
+    auto distort_coeffs_data = yaml["distort_coeffs"].as<std::vector<double>>();
+    this->camera_matrix = cv::Matx33d(camera_matrix_data.data());
+    // this->distort_coeffs = cv::Mat(distort_coeffs_data);
+    this->distort_coeffs = cv::Mat(distort_coeffs_data).clone();
+    // debug his->camera_matrix and his->distort_coeffs
+    cout << "Loaded camera matrix: \n" << this->camera_matrix << endl;
+    cout << "Loaded distort coeffs: \n" << this->distort_coeffs << endl;
 }
 
 bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
@@ -50,33 +47,12 @@ bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
     std::string text = "Collected: " + std::to_string(this->collected_count);
     putText(img, text, Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
 
-    // 手眼标定需要
-    if (this->distort_coeffs.empty() || !found) {
-        return false;
-    }
-
-    Mat rvec, tvec;
-    auto rNet = cv::solvePnP(
-        object_points,
-        pixel_points,
-        this->camera_matrix,
-        this->distort_coeffs,
-        rvec,
-        tvec,
-        false,
-        cv::SOLVEPNP_IPPE
-    );
-
-    if (enable_collect && rNet != 0) {
-        this->rvecs.push_back(rvec);
-        this->tvecs.push_back(tvec);
-    } else {
-        fmt::print("PnP failed!");
-    }
-
     return true;
 }
 
+/**
+    @brief 获取标定板角点
+*/
 bool Calibrate::collect_camera(
     IN Mat& img,
     OUT std::vector<Point2f>& pixel_points,
@@ -90,8 +66,8 @@ bool Calibrate::collect_camera(
     if (found) {
         // 获得 pixel_points 对应的 object_points
         object_points = calcChessboardCorners(pixel_points);
-        object_points[paramer.boardSize.width - 1].x =
-            object_points[0].x + paramer.grid_width; // 右上角点修正
+        // object_points[paramer.boardSize.width - 1].x =
+        //     object_points[0].x + paramer.grid_width; // 右上角点修正
 
         return true;
     }
@@ -99,6 +75,9 @@ bool Calibrate::collect_camera(
     return false;
 }
 
+/**
+    @brief 对采集到的数据进行相机标定
+*/
 bool Calibrate::calibrate_camera() {
     if (obj_points.size() < 1) {
         std::cerr << "Not enough data for calibration. Need at least 1 valid image." << std::endl;
@@ -167,7 +146,7 @@ bool Calibrate::calibrate_camera() {
     return true;
 }
 /**
-    @brief 计算标定板三维坐标
+    @brief 输入 2D 标定角点获得标定板坐标系点位
 */
 vector<Point3f> Calibrate::calcChessboardCorners(std::vector<cv::Point2f>& pixel_points) {
     vector<Point3f> corners;
@@ -198,7 +177,7 @@ vector<Point3f> Calibrate::calcChessboardCorners(std::vector<cv::Point2f>& pixel
 }
 
 /**
-    @brief 查找标定点
+    @brief 查找 2D 标定角点
 */
 bool Calibrate::find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pixel_points) {
     Mat img_gray;
@@ -209,8 +188,8 @@ bool Calibrate::find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pi
             found = findChessboardCornersSB(
                 img_gray,
                 paramer.boardSize,
-                pixel_points
-                , CALIB_CB_EXHAUSTIVE + cv::CALIB_CB_ACCURACY // 精度高flags，但是慢，默认的会快点
+                pixel_points,
+                CALIB_CB_EXHAUSTIVE + cv::CALIB_CB_ACCURACY // 精度高flags，但是慢，默认的会快点
             );
             break;
         case CIRCLES_GRID:
@@ -315,19 +294,22 @@ void Calibrate::saveCalibrationYAML(
 }
 
 /**
-    @brief 手眼标定收集数据
+    @brief 收集手眼标定数据
+    @param enable_collect 是否收集数据
 */
 void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool enable_collect) {
     // 获得标定点
     std::vector<Point2f> pixel_points;
     vector<Point3f> object_points;
     auto found = collect_camera(img, pixel_points, object_points);
+    if (!found) {
+        return;
+    }
 
     // PnP
     Mat rvec, tvec;
-    bool rNet;
-    if (found) {
-        rNet = cv::solvePnP(
+    if (enable_collect
+        && cv::solvePnP(
             object_points,
             pixel_points,
             this->camera_matrix,
@@ -336,10 +318,8 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
             tvec,
             false,
             cv::SOLVEPNP_IPPE
-        );
-    }
-
-    if (found && rNet && enable_collect) {
+        ))
+    {
         this->obj_points.push_back(object_points);
         this->img_points.push_back(pixel_points);
         this->rvecs.push_back(rvec);
@@ -362,6 +342,7 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
         std::cout << "camera tvec: " << tvec.t() << std::endl;
         Eigen::Vector3d tvec_vec(tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
         std::cout << "norm: " << tvec_vec.norm() << std::endl;
+        std::cout << "角点间距: " << cv::norm(pixel_points[0] - pixel_points[1]) << " px" << std::endl;
     }
 
     // 可视化
@@ -372,6 +353,9 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
     putText(img, text, Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
 }
 
+/**
+    @brief 可视化输入的云台欧拉角
+*/
 bool Calibrate::display_rpy(cv::Mat& img, const Eigen::Quaterniond& q) {
     // 可视化
     // Eigen::Vector3d rpy = q.toRotationMatrix().eulerAngles(0, 1, 2)* 180 / M_PI;
@@ -401,6 +385,9 @@ bool Calibrate::display_rpy(cv::Mat& img, const Eigen::Quaterniond& q) {
     return true;
 }
 
+/**
+    @brief 对收集到的数据进行手眼标定
+*/
 void Calibrate::calibrate_handeye() {
     // 手眼标定
     std::cout << "Start calibrate_handeye !!! " << std::endl;
@@ -414,6 +401,7 @@ void Calibrate::calibrate_handeye() {
         this->tvecs,
         R_camera2gimbal,
         t_camera2gimbal
+        ,CALIB_HAND_EYE_PARK
     );
     tm.stop();
     std::cout << "calibrateHandeye Latency:" << tm.getTimeSec() << " s" << std::endl;
@@ -424,18 +412,23 @@ void Calibrate::calibrate_handeye() {
     Eigen::Matrix3d R_camera2gimbal_eigen;
     cv::cv2eigen(R_camera2gimbal, R_camera2gimbal_eigen);
     Eigen::Matrix3d R_gimbal2ideal { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } };
-    Eigen::Matrix3d R_camera2ideal = R_gimbal2ideal * R_camera2gimbal_eigen;
+    Eigen::Matrix3d R_camera2ideal =
+        R_gimbal2ideal * R_camera2gimbal_eigen; // 基于ros坐标系看,相机到云台的旋转
     Eigen::Vector3d rpy =
         eulers(Eigen::Quaterniond { R_camera2ideal }, 1, 0, 2) * 180 / M_PI; // degree
 
     // 输出yaml
     print_yaml(R_camera2gimbal, t_camera2gimbal, rpy);
 
-    Eigen::Matrix3d R_ideal2camera = R_camera2ideal.transpose();
-    rpy = eulers(Eigen::Quaterniond { R_ideal2camera }, 1, 0, 2) * 180 / M_PI; // degree
+    Eigen::Matrix3d R_gimbal2camera_ros = R_camera2ideal.transpose();
+    rpy = eulers(Eigen::Quaterniond { R_gimbal2camera_ros }, 1, 0, 2) * 180 / M_PI; // degree
     print_yaml(t_camera2gimbal, rpy);
+
 }
 
+/**
+    @brief 输出手眼标定数据
+*/
 void Calibrate::print_yaml(
     const cv::Mat& R_camera2gimbal,
     const cv::Mat& t_camera2gimbal,
@@ -474,6 +467,9 @@ void Calibrate::print_yaml(
     fmt::print("\n{}\n", result.c_str());
 }
 
+/**
+    @brief 输出手眼标定数据
+*/
 void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d& rpy) {
     // 1. 格式化 xyz 字符串: "x y z"
     std::stringstream ss_xyz;
@@ -482,7 +478,7 @@ void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d
         ss_xyz << t_camera2gimbal.at<double>(i) << (i == 2 ? "" : " ");
     }
 
-    // 2. 格式化 rpy 字符串: "yaw pitch roll" 
+    // 2. 格式化 rpy 字符串: "yaw pitch roll"
     std::stringstream ss_rpy;
     auto rpy_rad = rpy * M_PI / 180;
     ss_rpy << std::fixed << std::setprecision(6); // 角度通常保留两位
@@ -520,6 +516,63 @@ void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d
     out << YAML::EndMap;
 
     std::cout << out.c_str() << std::endl;
+}
+
+/**
+ * @brief 计算单帧图像的平均重投影误差
+ * @return RMSE (均方根误差)和重投影点
+ */
+std::pair<double, std::vector<cv::Point2f>> Calibrate::validateCalibration(
+    const std::vector<cv::Point3f>& object_points,
+    const std::vector<cv::Point2f>& pixel_points,
+    const cv::Matx33d& camera_matrix,
+    const cv::Mat& distort_coeffs
+) {
+    // 1. 根据当前帧的像素点和 3D 点，计算当前相机位姿 (外参)
+    cv::Mat rvec, tvec;
+    cv::solvePnP(object_points, pixel_points, camera_matrix, distort_coeffs, rvec, tvec);
+
+    // 2. 将 3D 物体点重投影到图像平面
+    std::vector<cv::Point2f> projected_points;
+    cv::projectPoints(object_points, rvec, tvec, camera_matrix, distort_coeffs, projected_points);
+
+    // 3. 计算检测点与重投影点之间的 L2 范数 (像素距离)
+    double total_err = 0;
+    for (size_t i = 0; i < pixel_points.size(); i++) {
+        double err = cv::norm(pixel_points[i] - projected_points[i]);
+        total_err += err * err;
+    }
+
+    // 4. 返回均方根误差 (RMSE)
+    return {std::sqrt(total_err / pixel_points.size()), projected_points};
+}
+
+void Calibrate::display_error(cv::Mat& img) {
+    // 获得标定点
+    std::vector<Point2f> pixel_points;
+    vector<Point3f> object_points;
+    auto found = collect_camera(img, pixel_points, object_points);
+    if (!found) {
+        return;
+    }
+
+    auto [error, projected_points] =
+        validateCalibration(object_points, pixel_points, this->camera_matrix, this->distort_coeffs);
+
+    // 可视化
+    cv::putText(
+        img,
+        fmt::format("RMSE: {:.2f} px", error),
+        { 40, 40 },
+        cv::FONT_HERSHEY_SIMPLEX,
+        1.0,
+        { 0, 0, 255 },
+        2
+    );
+    for (size_t i = 0; i < pixel_points.size(); i++) {
+        cv::circle(img, pixel_points[i], 3, cv::Scalar(0, 0, 255), -1);     // 实际点：红色
+        cv::circle(img, projected_points[i], 2, cv::Scalar(255, 0, 0), -1); // 投影点：蓝色
+    }
 }
 
 } // namespace qd::calibrate

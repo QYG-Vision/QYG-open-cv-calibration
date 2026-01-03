@@ -19,7 +19,12 @@ sudo apt install cmake libopencv-dev libyaml-cpp-dev libfmt-dev libeigen3-dev
 ```bash
 cmake -B build
 make -C build
-./build/calibration
+# 相机标定
+./build/calibrateCamera
+# 手眼标定
+./build/calibrateHandEye
+# 计算重投影误差
+./build/calculateError
 ```
 
 > 手眼标定程序需要按 <kdb>s<ked/> 收集标定信息，标定时标定板和云台基坐标不能动
