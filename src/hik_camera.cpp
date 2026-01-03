@@ -9,7 +9,7 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
     std::cout << "HIK SDK version: " << std::hex << version << std::dec << std::endl;
 
     auto yaml = YAML::LoadFile(config_path);
-
+    exposure_time_ = yaml["HIK"]["exposure_time"].as<double>();
     // 枚举设备
     MV_CC_DEVICE_INFO_LIST device_list;
     nRet = MV_CC_EnumDevices(MV_USB_DEVICE, &device_list);
@@ -71,7 +71,12 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
         while (running_) {
             MV_FRAME_OUT raw;
             nRet = MV_CC_GetImageBuffer(camera_handle_, &raw, 1000);
+            // 打上时间戳
             auto timestamp = std::chrono::steady_clock::now();
+            std::chrono::duration<double, std::micro> half_exposure(exposure_time_ / 2.0);
+            timestamp = timestamp + 
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(half_exposure);
+            
             if (nRet != MV_OK) {
                 std::cout << std::hex << "No image data: " << nRet << std::dec << std::endl;
                 continue;

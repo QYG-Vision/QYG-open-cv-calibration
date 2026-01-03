@@ -23,6 +23,7 @@ private:
     void* camera_handle_ { nullptr };
     int nRet = MV_OK;
     cv::ColorConversionCodes color_code_;
+    double exposure_time_;
     cv::Mat image;
     tools::ThreadSafeQueue<CameraData> queue_;
     std::thread daemon_thread_;
