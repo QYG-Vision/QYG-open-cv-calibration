@@ -23,8 +23,10 @@ make -C build
 ./build/calibrateCamera
 # 手眼标定
 ./build/calibrateHandEye
-# 计算重投影误差
+# 验证相机标定，计算重投影误差
 ./build/calculateError
+# 验证手眼标定,需要先手眼标定生成参数文件
+./build/validateHandEye 
 ```
 
-> 手眼标定程序需要按 <kdb>s<ked/> 收集标定信息，标定时标定板和云台基坐标不能动
+> 标定程序都需要按 <kdb>s<ked/> 收集标定信息，手眼标定时标定板和云台基坐标不能动

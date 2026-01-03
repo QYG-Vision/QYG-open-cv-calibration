@@ -5,17 +5,16 @@
 #include <fmt/core.h>
 #include <fmt/format.h>
 // c++
+#include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <chrono>
 // opencv
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/opencv.hpp>
 #include <sstream>
 // yaml-cpp
 #include <yaml-cpp/yaml.h>
-
 
 #define IN
 #define OUT
@@ -60,7 +59,11 @@ public:
     Calibrate(const std::string& config_path);
 
     bool collect_camera(Mat& img, bool enable_collect = false);
-    bool collect_camera(IN Mat& img, OUT std::vector<Point2f>& pixel_points, OUT vector<Point3f>& object_points);
+    bool collect_camera(
+        IN Mat& img,
+        OUT std::vector<Point2f>& pixel_points,
+        OUT vector<Point3f>& object_points
+    );
     void collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool enable_collect = false);
 
     bool calibrate_camera();
@@ -71,12 +74,16 @@ public:
 
     bool display_rpy(cv::Mat& img, const Eigen::Quaterniond& q);
     void display_error(cv::Mat& img);
-    std::pair<double, std::vector<cv::Point2f>> validateCalibration(
-    const std::vector<cv::Point3f>& object_points,
-    const std::vector<cv::Point2f>& pixel_points,
-    const cv::Matx33d& camera_matrix,
-    const cv::Mat& distort_coeffs
+
+    double calculate_reprojection_error(
+        const std::vector<cv::Point2f>& pixel_points,
+        const std::vector<cv::Point2f>& projected_points
     );
+
+    // 手眼标定验证相关方法
+    bool load_handeye_calibration(const std::string& handeye_yaml_path);
+    void validate_handeye(cv::Mat& img, const Eigen::Quaterniond& gimbal_quaternion);
+    void reset_validation_stats(); // 重置验证统计信息
 private:
     void saveCalibrationYAML(
         const cv::Size& image_size,
@@ -89,14 +96,17 @@ private:
         const cv::Mat& t_camera2gimbal,
         const Eigen::Vector3d& rpy
     );
-    void print_yaml(
+    void print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d& rpy);
+    void saveHandEyeCalibrationYAML(
+        const cv::Mat& R_camera2gimbal,
         const cv::Mat& t_camera2gimbal,
-        const Eigen::Vector3d& rpy
+        const Eigen::Vector3d& rpy,
+        const std::string& filename
     );
 
 public:
     Paramer paramer;
-    
+
 private:
     Size img_size;
 
@@ -108,84 +118,97 @@ private:
     std::vector<cv::Mat> rvecs, tvecs;
     // 手眼标定用数据
     std::vector<cv::Mat> R_gimbal2world_list, t_gimbal2world_list;
+    // 手眼标定结果（用于验证）
+    cv::Mat R_camera2gimbal;
+    cv::Mat t_camera2gimbal;
+    bool handeye_loaded = false;
+    // 验证用历史数据（用于计算位置一致性）
+    std::vector<cv::Mat> world_positions_history; // 存储标定板在世界坐标系下的位置历史
 
     cv::TickMeter tm; // 延迟计时器
     int collected_count = 0; // 已采集的标定图像数量
-    
 };
 
-static double limit_rad(double angle)
-{
-  while (angle > CV_PI) angle -= 2 * CV_PI;
-  while (angle <= -CV_PI) angle += 2 * CV_PI;
-  return angle;
+static double limit_rad(double angle) {
+    while (angle > CV_PI)
+        angle -= 2 * CV_PI;
+    while (angle <= -CV_PI)
+        angle += 2 * CV_PI;
+    return angle;
 }
 
-static Eigen::Vector3d eulers(Eigen::Quaterniond q, int axis0, int axis1, int axis2, bool extrinsic=false)
-{
-  if (!extrinsic) std::swap(axis0, axis2);
+static Eigen::Vector3d
+eulers(Eigen::Quaterniond q, int axis0, int axis1, int axis2, bool extrinsic = false) {
+    if (!extrinsic)
+        std::swap(axis0, axis2);
 
-  auto i = axis0, j = axis1, k = axis2;
-  auto is_proper = (i == k);
-  if (is_proper) k = 3 - i - j;
-  auto sign = (i - j) * (j - k) * (k - i) / 2;
+    auto i = axis0, j = axis1, k = axis2;
+    auto is_proper = (i == k);
+    if (is_proper)
+        k = 3 - i - j;
+    auto sign = (i - j) * (j - k) * (k - i) / 2;
 
-  double a, b, c, d;
-  Eigen::Vector4d xyzw = q.coeffs();
-  if (is_proper) {
-    a = xyzw[3];
-    b = xyzw[i];
-    c = xyzw[j];
-    d = xyzw[k] * sign;
-  } else {
-    a = xyzw[3] - xyzw[j];
-    b = xyzw[i] + xyzw[k] * sign;
-    c = xyzw[j] + xyzw[3];
-    d = xyzw[k] * sign - xyzw[i];
-  }
-
-  Eigen::Vector3d eulers;
-  auto n2 = a * a + b * b + c * c + d * d;
-  eulers[1] = std::acos(2 * (a * a + b * b) / n2 - 1);
-
-  auto half_sum = std::atan2(b, a);
-  auto half_diff = std::atan2(-d, c);
-
-  auto eps = 1e-7;
-  auto safe1 = std::abs(eulers[1]) >= eps;
-  auto safe2 = std::abs(eulers[1] - CV_PI) >= eps;
-  auto safe = safe1 && safe2;
-  if (safe) {
-    eulers[0] = half_sum + half_diff;
-    eulers[2] = half_sum - half_diff;
-  } else {
-    if (!extrinsic) {
-      eulers[0] = 0;
-      if (!safe1) eulers[2] = 2 * half_sum;
-      if (!safe2) eulers[2] = -2 * half_diff;
+    double a, b, c, d;
+    Eigen::Vector4d xyzw = q.coeffs();
+    if (is_proper) {
+        a = xyzw[3];
+        b = xyzw[i];
+        c = xyzw[j];
+        d = xyzw[k] * sign;
     } else {
-      eulers[2] = 0;
-      if (!safe1) eulers[0] = 2 * half_sum;
-      if (!safe2) eulers[0] = 2 * half_diff;
+        a = xyzw[3] - xyzw[j];
+        b = xyzw[i] + xyzw[k] * sign;
+        c = xyzw[j] + xyzw[3];
+        d = xyzw[k] * sign - xyzw[i];
     }
-  }
 
-  for (int i = 0; i < 3; i++) eulers[i] = limit_rad(eulers[i]);
+    Eigen::Vector3d eulers;
+    auto n2 = a * a + b * b + c * c + d * d;
+    eulers[1] = std::acos(2 * (a * a + b * b) / n2 - 1);
 
-  if (!is_proper) {
-    eulers[2] *= sign;
-    eulers[1] -= CV_PI / 2;
-  }
+    auto half_sum = std::atan2(b, a);
+    auto half_diff = std::atan2(-d, c);
 
-  if (!extrinsic) std::swap(eulers[0], eulers[2]);
+    auto eps = 1e-7;
+    auto safe1 = std::abs(eulers[1]) >= eps;
+    auto safe2 = std::abs(eulers[1] - CV_PI) >= eps;
+    auto safe = safe1 && safe2;
+    if (safe) {
+        eulers[0] = half_sum + half_diff;
+        eulers[2] = half_sum - half_diff;
+    } else {
+        if (!extrinsic) {
+            eulers[0] = 0;
+            if (!safe1)
+                eulers[2] = 2 * half_sum;
+            if (!safe2)
+                eulers[2] = -2 * half_diff;
+        } else {
+            eulers[2] = 0;
+            if (!safe1)
+                eulers[0] = 2 * half_sum;
+            if (!safe2)
+                eulers[0] = 2 * half_diff;
+        }
+    }
 
-  return eulers;
+    for (int i = 0; i < 3; i++)
+        eulers[i] = limit_rad(eulers[i]);
+
+    if (!is_proper) {
+        eulers[2] *= sign;
+        eulers[1] -= CV_PI / 2;
+    }
+
+    if (!extrinsic)
+        std::swap(eulers[0], eulers[2]);
+
+    return eulers;
 }
 
-static Eigen::Vector3d eulers(Eigen::Matrix3d R, int axis0, int axis1, int axis2, bool extrinsic)
-{
-  Eigen::Quaterniond q(R);
-  return eulers(q, axis0, axis1, axis2, extrinsic);
+static Eigen::Vector3d eulers(Eigen::Matrix3d R, int axis0, int axis1, int axis2, bool extrinsic) {
+    Eigen::Quaterniond q(R);
+    return eulers(q, axis0, axis1, axis2, extrinsic);
 }
 
 } // namespace qd::calibrate

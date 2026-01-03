@@ -342,7 +342,8 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
         std::cout << "camera tvec: " << tvec.t() << std::endl;
         Eigen::Vector3d tvec_vec(tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
         std::cout << "norm: " << tvec_vec.norm() << std::endl;
-        std::cout << "角点间距: " << cv::norm(pixel_points[0] - pixel_points[1]) << " px" << std::endl;
+        std::cout << "角点间距: " << cv::norm(pixel_points[0] - pixel_points[1]) << " px"
+                  << std::endl;
     }
 
     // 可视化
@@ -400,8 +401,8 @@ void Calibrate::calibrate_handeye() {
         this->rvecs,
         this->tvecs,
         R_camera2gimbal,
-        t_camera2gimbal
-        ,CALIB_HAND_EYE_PARK
+        t_camera2gimbal,
+        CALIB_HAND_EYE_PARK
     );
     tm.stop();
     std::cout << "calibrateHandeye Latency:" << tm.getTimeSec() << " s" << std::endl;
@@ -411,19 +412,19 @@ void Calibrate::calibrate_handeye() {
     // 计算相机同理想情况的偏角
     Eigen::Matrix3d R_camera2gimbal_eigen;
     cv::cv2eigen(R_camera2gimbal, R_camera2gimbal_eigen);
-    Eigen::Matrix3d R_gimbal2ideal { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } };
-    Eigen::Matrix3d R_camera2ideal =
-        R_gimbal2ideal * R_camera2gimbal_eigen; // 基于ros坐标系看,相机到云台的旋转
-    Eigen::Vector3d rpy =
-        eulers(Eigen::Quaterniond { R_camera2ideal }, 1, 0, 2) * 180 / M_PI; // degree
+    Eigen::Matrix3d R_gimbal2ideal { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } }; // 轴变化矩阵
 
     // 输出yaml
-    print_yaml(R_camera2gimbal, t_camera2gimbal, rpy);
-
-    Eigen::Matrix3d R_gimbal2camera_ros = R_camera2ideal.transpose();
-    rpy = eulers(Eigen::Quaterniond { R_gimbal2camera_ros }, 1, 0, 2) * 180 / M_PI; // degree
+    Eigen::Matrix3d R_cameraFLU2gimbalFLU =
+        R_camera2gimbal_eigen * R_gimbal2ideal; // 变更camera坐标系为FLU
+    Eigen::Matrix3d R_gimbalFLU2cameraFLU = R_cameraFLU2gimbalFLU.transpose();
+    Eigen::Vector3d rpy =
+        eulers(Eigen::Quaterniond { R_gimbalFLU2cameraFLU }, 2, 1, 0) * 180 / M_PI; // degree
+    // 输出标定信息
     print_yaml(t_camera2gimbal, rpy);
 
+    // 保存手眼标定结果到文件
+    saveHandEyeCalibrationYAML(R_camera2gimbal, t_camera2gimbal, rpy, "handeye_calibration.yaml");
 }
 
 /**
@@ -518,35 +519,6 @@ void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d
     std::cout << out.c_str() << std::endl;
 }
 
-/**
- * @brief 计算单帧图像的平均重投影误差
- * @return RMSE (均方根误差)和重投影点
- */
-std::pair<double, std::vector<cv::Point2f>> Calibrate::validateCalibration(
-    const std::vector<cv::Point3f>& object_points,
-    const std::vector<cv::Point2f>& pixel_points,
-    const cv::Matx33d& camera_matrix,
-    const cv::Mat& distort_coeffs
-) {
-    // 1. 根据当前帧的像素点和 3D 点，计算当前相机位姿 (外参)
-    cv::Mat rvec, tvec;
-    cv::solvePnP(object_points, pixel_points, camera_matrix, distort_coeffs, rvec, tvec);
-
-    // 2. 将 3D 物体点重投影到图像平面
-    std::vector<cv::Point2f> projected_points;
-    cv::projectPoints(object_points, rvec, tvec, camera_matrix, distort_coeffs, projected_points);
-
-    // 3. 计算检测点与重投影点之间的 L2 范数 (像素距离)
-    double total_err = 0;
-    for (size_t i = 0; i < pixel_points.size(); i++) {
-        double err = cv::norm(pixel_points[i] - projected_points[i]);
-        total_err += err * err;
-    }
-
-    // 4. 返回均方根误差 (RMSE)
-    return {std::sqrt(total_err / pixel_points.size()), projected_points};
-}
-
 void Calibrate::display_error(cv::Mat& img) {
     // 获得标定点
     std::vector<Point2f> pixel_points;
@@ -556,8 +528,17 @@ void Calibrate::display_error(cv::Mat& img) {
         return;
     }
 
-    auto [error, projected_points] =
-        validateCalibration(object_points, pixel_points, this->camera_matrix, this->distort_coeffs);
+    // 计算重投影误差
+    // 1. 根据当前帧的像素点和 3D 点，计算当前相机位姿 (外参)
+    cv::Mat rvec, tvec;
+    cv::solvePnP(object_points, pixel_points, camera_matrix, distort_coeffs, rvec, tvec);
+
+    // 2. 将 3D 物体点重投影到图像平面
+    std::vector<cv::Point2f> projected_points;
+    cv::projectPoints(object_points, rvec, tvec, camera_matrix, distort_coeffs, projected_points);
+
+    // 3. 计算检测点与重投影点之间的 L2 范数 (像素距离)
+    double error = calculate_reprojection_error(pixel_points, projected_points);
 
     // 可视化
     cv::putText(
@@ -569,10 +550,429 @@ void Calibrate::display_error(cv::Mat& img) {
         { 0, 0, 255 },
         2
     );
+    cv::putText(
+        img,
+        fmt::format(
+            "tvec: {:.2f} {:.2f} {:.2f}",
+            tvec.at<double>(0),
+            tvec.at<double>(1),
+            tvec.at<double>(2)
+        ),
+        { 40, 80 },
+        cv::FONT_HERSHEY_SIMPLEX,
+        1.0,
+        { 0, 0, 255 },
+        2
+    );
+    cv::putText(
+        img,
+        fmt::format("norm: {:.2f}", cv::norm(tvec)),
+        { 40, 120 },
+        cv::FONT_HERSHEY_SIMPLEX,
+        1.0,
+        { 0, 0, 255 },
+        2
+    );
     for (size_t i = 0; i < pixel_points.size(); i++) {
-        cv::circle(img, pixel_points[i], 3, cv::Scalar(0, 0, 255), -1);     // 实际点：红色
+        cv::circle(img, pixel_points[i], 3, cv::Scalar(0, 0, 255), -1); // 实际点：红色
         cv::circle(img, projected_points[i], 2, cv::Scalar(255, 0, 0), -1); // 投影点：蓝色
     }
+}
+
+/**
+ * @brief 保存手眼标定结果到YAML文件
+ * @param R_camera2gimbal 相机到云台的旋转矩阵
+ * @param t_camera2gimbal 相机到云台的平移向量
+ * @param rpy 相机同理想情况的偏角
+ * @param filename 输出的YAML文件路径
+ */
+void Calibrate::saveHandEyeCalibrationYAML(
+    const cv::Mat& R_camera2gimbal,
+    const cv::Mat& t_camera2gimbal,
+    const Eigen::Vector3d& rpy,
+    const std::string& filename
+) {
+    YAML::Node node;
+
+    // 添加注释
+    node["comment"] = fmt::format(
+        "相机同理想情况的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
+        rpy[2],
+        rpy[1],
+        rpy[0]
+    );
+
+    // 保存R_camera2gimbal
+    std::vector<double> R_data(R_camera2gimbal.begin<double>(), R_camera2gimbal.end<double>());
+    node["R_camera2gimbal"] = R_data;
+    node["R_camera2gimbal"].SetStyle(YAML::EmitterStyle::Flow);
+
+    // 保存t_camera2gimbal
+    std::vector<double> t_data(t_camera2gimbal.begin<double>(), t_camera2gimbal.end<double>());
+    node["t_camera2gimbal"] = t_data;
+    node["t_camera2gimbal"].SetStyle(YAML::EmitterStyle::Flow);
+
+    // 保存到文件
+    std::ofstream fout(filename);
+    fout << node;
+    fout.close();
+
+    std::cout << "手眼标定结果已保存到 " << filename << std::endl;
+}
+
+/**
+ * @brief 从YAML文件加载手眼标定结果
+ * @param handeye_yaml_path 手眼标定结果YAML文件路径
+ * @return 是否成功加载
+ */
+bool Calibrate::load_handeye_calibration(const std::string& handeye_yaml_path) {
+    try {
+        auto yaml = YAML::LoadFile(handeye_yaml_path);
+
+        // 加载R_camera2gimbal
+        if (yaml["R_camera2gimbal"]) {
+            auto R_data = yaml["R_camera2gimbal"].as<std::vector<double>>();
+            if (R_data.size() == 9) {
+                R_camera2gimbal = cv::Mat(3, 3, CV_64F, R_data.data()).clone();
+            } else {
+                std::cerr << "R_camera2gimbal数据格式错误，需要9个元素" << std::endl;
+                return false;
+            }
+        } else {
+            std::cerr << "YAML文件中未找到R_camera2gimbal" << std::endl;
+            return false;
+        }
+
+        // 加载t_camera2gimbal
+        if (yaml["t_camera2gimbal"]) {
+            auto t_data = yaml["t_camera2gimbal"].as<std::vector<double>>();
+            if (t_data.size() == 3) {
+                t_camera2gimbal = cv::Mat(3, 1, CV_64F, t_data.data()).clone();
+            } else {
+                std::cerr << "t_camera2gimbal数据格式错误，需要3个元素" << std::endl;
+                return false;
+            }
+        } else {
+            std::cerr << "YAML文件中未找到t_camera2gimbal" << std::endl;
+            return false;
+        }
+
+        handeye_loaded = true;
+        std::cout << "手眼标定结果加载成功！" << std::endl;
+        std::cout << "R_camera2gimbal:\n" << R_camera2gimbal << std::endl;
+        std::cout << "t_camera2gimbal:\n" << t_camera2gimbal << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "加载手眼标定结果失败: " << e.what() << std::endl;
+        return false;
+    }
+}
+
+/**
+ * @brief 验证手眼标定准确性
+ * @param img 输入图像
+ * @param gimbal_quaternion 云台四元数（用于对比）
+ */
+void Calibrate::validate_handeye(cv::Mat& img, const Eigen::Quaterniond& gimbal_quaternion) {
+    if (!handeye_loaded) {
+        cv::putText(
+            img,
+            "手眼标定结果未加载！",
+            { 40, 40 },
+            cv::FONT_HERSHEY_SIMPLEX,
+            1.0,
+            { 0, 0, 255 },
+            2
+        );
+        return;
+    }
+
+    // 获得标定点
+    std::vector<Point2f> pixel_points;
+    vector<Point3f> object_points;
+    auto found = collect_camera(img, pixel_points, object_points);
+    if (!found) {
+        cv::putText(
+            img,
+            "未检测到标定板",
+            { 40, 40 },
+            cv::FONT_HERSHEY_SIMPLEX,
+            1.0,
+            { 0, 0, 255 },
+            2
+        );
+        return;
+    }
+
+    // 通过PnP求解标定板在相机坐标系下的位姿
+    cv::Mat rvec_board2camera, tvec_board2camera;
+    if (!cv::solvePnP(
+            object_points,
+            pixel_points,
+            this->camera_matrix,
+            this->distort_coeffs,
+            rvec_board2camera,
+            tvec_board2camera,
+            false,
+            cv::SOLVEPNP_IPPE
+        ))
+    {
+        cv::putText(
+            img,
+            "PnP求解失败",
+            { 40, 40 },
+            cv::FONT_HERSHEY_SIMPLEX,
+            1.0,
+            { 0, 0, 255 },
+            2
+        );
+        return;
+    }
+
+    // 将旋转向量转换为旋转矩阵
+    cv::Mat R_board2camera;
+    cv::Rodrigues(rvec_board2camera, R_board2camera);
+
+    // 将标定板位姿从相机坐标系转换到云台坐标系
+    // T_board2gimbal = T_camera2gimbal * T_board2camera
+    cv::Mat R_board2gimbal = R_camera2gimbal * R_board2camera;
+    cv::Mat t_board2gimbal = R_camera2gimbal * tvec_board2camera + t_camera2gimbal;
+
+    // 将标定板位姿从云台坐标系转换到世界坐标系
+    // 云台到世界的旋转矩阵（从串口获取的云台姿态）
+    Eigen::Matrix3d R_gimbal2world = gimbal_quaternion.toRotationMatrix();
+    cv::Mat R_gimbal2world_cv;
+    cv::eigen2cv(R_gimbal2world, R_gimbal2world_cv);
+
+    // T_board2world = T_gimbal2world * T_board2gimbal
+    cv::Mat R_board2world = R_gimbal2world_cv * R_board2gimbal;
+    cv::Mat t_board2world =
+        R_gimbal2world_cv * t_board2gimbal; // 假设云台在世界坐标系原点，t_gimbal2world = 0
+
+    // 保存到历史记录（用于计算一致性）
+    world_positions_history.push_back(t_board2world.clone());
+    // 限制历史记录数量，避免内存过大
+    if (world_positions_history.size() > 100) {
+        world_positions_history.erase(world_positions_history.begin());
+    }
+
+    // 计算位置一致性（标准差）
+    double position_std = 0.0;
+    if (world_positions_history.size() > 1) {
+        cv::Mat mean_pos = cv::Mat::zeros(3, 1, CV_64F);
+        for (const auto& pos: world_positions_history) {
+            mean_pos += pos;
+        }
+        mean_pos /= world_positions_history.size();
+
+        double variance = 0.0;
+        for (const auto& pos: world_positions_history) {
+            cv::Mat diff = pos - mean_pos;
+            variance += cv::norm(diff) * cv::norm(diff);
+        }
+        position_std = std::sqrt(variance / world_positions_history.size());
+    }
+
+    // 计算标定板在云台坐标系下的欧拉角（用于显示）
+    Eigen::Matrix3d R_board2gimbal_eigen;
+    cv::cv2eigen(R_board2gimbal, R_board2gimbal_eigen);
+    Eigen::Quaterniond q_board2gimbal(R_board2gimbal_eigen);
+    Eigen::Vector3d rpy_board2gimbal =
+        eulers(q_board2gimbal, 2, 1, 0) * 180 / M_PI; // yaw, pitch, roll (度)
+
+    // 计算标定板在世界坐标系下的欧拉角
+    Eigen::Matrix3d R_board2world_eigen;
+    cv::cv2eigen(R_board2world, R_board2world_eigen);
+    Eigen::Quaterniond q_board2world(R_board2world_eigen);
+    Eigen::Vector3d rpy_board2world = eulers(q_board2world, 2, 1, 0) * 180 / M_PI;
+
+    // 获取云台的欧拉角（世界坐标系）
+    Eigen::Vector3d rpy_gimbal = eulers(gimbal_quaternion, 2, 1, 0) * 180 / M_PI;
+
+    // 计算位置误差（距离）- 标定板到云台的距离
+    double position_error = cv::norm(t_board2gimbal);
+
+    // 计算重投影误差（验证PnP和相机内参的准确性）
+    std::vector<cv::Point2f> reprojected_points;
+    cv::projectPoints(
+        object_points,
+        rvec_board2camera,
+        tvec_board2camera,
+        this->camera_matrix,
+        this->distort_coeffs,
+        reprojected_points
+    );
+    double reprojection_error = calculate_reprojection_error(pixel_points, reprojected_points);
+
+    // 可视化显示
+    int y_offset = 30;
+    int line_height = 28;
+
+    // 显示云台在世界坐标系下的姿态（参考）
+    cv::putText(
+        img,
+        fmt::format(
+            "Gimbal RPY (World): Y{:.2f} P{:.2f} R{:.2f} deg",
+            rpy_gimbal[0],
+            rpy_gimbal[1],
+            rpy_gimbal[2]
+        ),
+        { 40, y_offset },
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.65,
+        { 255, 0, 0 },
+        2
+    );
+    y_offset += line_height;
+
+    // 显示标定板在世界坐标系下的位置（关键指标）
+    cv::Scalar world_pos_color = position_std < 0.01 ? cv::Scalar(0, 255, 0)
+        : position_std < 0.02                        ? cv::Scalar(0, 165, 255)
+                                                     : cv::Scalar(0, 0, 255);
+    cv::putText(
+        img,
+        fmt::format(
+            "Board2World Pos: X{:.3f} Y{:.3f} Z{:.3f} m",
+            t_board2world.at<double>(0),
+            t_board2world.at<double>(1),
+            t_board2world.at<double>(2)
+        ),
+        { 40, y_offset },
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.65,
+        world_pos_color,
+        2
+    );
+    y_offset += line_height;
+
+    // 显示标定板在世界坐标系下的姿态
+    cv::putText(
+        img,
+        fmt::format(
+            "Board2World RPY: Y{:.2f} P{:.2f} R{:.2f} deg",
+            rpy_board2world[0],
+            rpy_board2world[1],
+            rpy_board2world[2]
+        ),
+        { 40, y_offset },
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.65,
+        { 0, 255, 0 },
+        2
+    );
+    y_offset += line_height;
+
+    // 显示位置一致性（标准差）- 这是判断准确性的关键指标
+    cv::putText(
+        img,
+        fmt::format(
+            "Position StdDev: {:.4f} m (N={})",
+            position_std,
+            world_positions_history.size()
+        ),
+        { 40, y_offset },
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.65,
+        world_pos_color,
+        2
+    );
+    y_offset += line_height;
+
+    // 显示标定板到云台的距离（参考）
+    cv::putText(
+        img,
+        fmt::format("Board2Gimbal Dist: {:.3f} m", position_error),
+        { 40, y_offset },
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.65,
+        { 0, 165, 255 },
+        2
+    );
+    y_offset += line_height;
+
+    // 显示重投影误差（这是判断准确性的关键指标）
+    cv::Scalar error_color = reprojection_error < 1.0 ? cv::Scalar(0, 255, 0)
+        : reprojection_error < 2.0                    ? cv::Scalar(0, 165, 255)
+                                                      : cv::Scalar(0, 0, 255);
+    cv::putText(
+        img,
+        fmt::format("Reprojection Error: {:.2f} px", reprojection_error),
+        { 40, y_offset },
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.65,
+        error_color,
+        2
+    );
+    y_offset += line_height;
+
+    // 添加提示信息
+    if (world_positions_history.size() < 5) {
+        cv::putText(
+            img,
+            "Tip: Rotate gimbal to collect more data",
+            { 40, y_offset },
+            cv::FONT_HERSHEY_SIMPLEX,
+            0.6,
+            { 255, 255, 0 },
+            2
+        );
+    }
+
+    // 显示标定板在相机坐标系下的距离
+    cv::putText(
+        img,
+        fmt::format("Board2Camera Dist: {:.3f} m", cv::norm(tvec_board2camera)),
+        { 40, y_offset },
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.65,
+        { 0, 165, 255 },
+        2
+    );
+
+    // 绘制坐标轴（标定板坐标系）
+    std::vector<cv::Point3f> axis_points = {
+        cv::Point3f(0, 0, 0),
+        cv::Point3f(paramer.squareSize * 3, 0, 0), // X轴 - 红色
+        cv::Point3f(0, paramer.squareSize * 3, 0), // Y轴 - 绿色
+        cv::Point3f(0, 0, -paramer.squareSize * 3) // Z轴 - 蓝色
+    };
+    std::vector<cv::Point2f> projected_axis;
+    cv::projectPoints(
+        axis_points,
+        rvec_board2camera,
+        tvec_board2camera,
+        this->camera_matrix,
+        this->distort_coeffs,
+        projected_axis
+    );
+
+    if (projected_axis.size() >= 4) {
+        cv::line(img, projected_axis[0], projected_axis[1], cv::Scalar(0, 0, 255), 3); // X轴 - 红色
+        cv::line(img, projected_axis[0], projected_axis[2], cv::Scalar(0, 255, 0), 3); // Y轴 - 绿色
+        cv::line(img, projected_axis[0], projected_axis[3], cv::Scalar(255, 0, 0), 3); // Z轴 - 蓝色
+    }
+}
+
+/**
+ * @brief 重置验证统计信息
+ */
+void Calibrate::reset_validation_stats() {
+    world_positions_history.clear();
+}
+
+/**
+    @brief 计算重投影误差
+    @param object_points 3D 物体点
+    @param pixel_points 2D 像素点
+    @return 重投影误差
+*/
+double Calibrate::calculate_reprojection_error(const std::vector<cv::Point2f>& pixel_points, const std::vector<cv::Point2f>& projected_points){
+    double total_err = 0;
+    for (size_t i = 0; i < pixel_points.size(); i++) {
+        double err = cv::norm(pixel_points[i] - projected_points[i]);
+        total_err += err * err;
+    }
+    return std::sqrt(total_err / pixel_points.size());
 }
 
 } // namespace qd::calibrate
