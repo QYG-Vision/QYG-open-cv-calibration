@@ -8,6 +8,7 @@
 #include <memory>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
+#include <opencv2/opencv.hpp>
 
 using namespace std;
 using namespace cv;
@@ -56,7 +57,7 @@ int main(int argc, char* argv[]) {
     // 初始化标定类
     auto calibrate_ = qd::calibrate::Calibrate(config_path);
 
-    namedWindow("按 c 开始标定", WINDOW_NORMAL);
+    namedWindow("相机标定");
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
     std::cout << "开始标定，按 'c' 键开始计算标定参数，按 's' 键采集标定数据，按 'ESC' 键退出"
@@ -79,7 +80,7 @@ int main(int argc, char* argv[]) {
 
         calibrate_.collect_camera(img);
 
-        imshow("按 c 开始标定", img);
+        imshow("相机标定", img);
         int key = waitKey(wait_time);
         if (key == 'c') {
             if (calibrate_.calibrate_camera()) {

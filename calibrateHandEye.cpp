@@ -56,7 +56,7 @@ int main(int argc, char* argv[]) {
     // 手眼标定串口
     std::unique_ptr<Serial_driver> protocol_ = std::make_unique<Serial_driver>(config_path);
 
-    namedWindow("按 c 开始标定");
+    namedWindow("手眼标定");
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
     std::cout << "开始标定，按 'c' 键开始计算标定参数，按 's' 键采集数据，按 'ESC' 键退出" << std::endl;
@@ -77,7 +77,7 @@ int main(int argc, char* argv[]) {
         img_back = img.clone();
         calibrate_.collect_handeye(img, q);
 
-        imshow("按 c 开始标定", img);
+        imshow("手眼标定", img);
         int key = waitKey(10);
         if (key == 'c') {
             calibrate_.calibrate_handeye();
