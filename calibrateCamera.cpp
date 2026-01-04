@@ -17,6 +17,8 @@ const std::string keys =
     "{help h usage ? |                          | 输出命令行参数说明}"
     "{config-path c  | config/calibration.yaml | yaml配置文件路径 }";
 
+int wait_time = 1; // 用于图片显示延迟
+
 /**
     @brief 加载设备
     @param config_path 配置文件路径
@@ -32,6 +34,7 @@ std::unique_ptr<qd::Device::Device> load_device(const std::string& config_path) 
         return std::make_unique<qd::Device::UVC_Camera>(config_path);
         cout << "read form UVC" << endl;
     } else if (device_type == "IMG") {
+        wait_time = 0;
         return std::make_unique<qd::Device::Image_Reader>(config_path);
         cout << "read form images" << endl;
     }
@@ -77,7 +80,7 @@ int main(int argc, char* argv[]) {
         calibrate_.collect_camera(img);
 
         imshow("按 c 开始标定", img);
-        int key = waitKey(10);
+        int key = waitKey(wait_time);
         if (key == 'c') {
             if (calibrate_.calibrate_camera()) {
                 cv::destroyAllWindows();

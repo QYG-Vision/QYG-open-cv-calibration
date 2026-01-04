@@ -113,8 +113,12 @@ private:
     // 标定用数据
     std::vector<std::vector<cv::Point3f>> obj_points;
     std::vector<std::vector<cv::Point2f>> img_points;
+
+    // 参数
     cv::Matx33d camera_matrix;
     cv::Mat distort_coeffs;
+    int calibrateCamera_flags_ = cv::CALIB_FIX_K3;
+
     std::vector<cv::Mat> rvecs, tvecs;
     // 手眼标定用数据
     std::vector<cv::Mat> R_gimbal2world_list, t_gimbal2world_list;

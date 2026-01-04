@@ -18,6 +18,8 @@ Calibrate::Calibrate(const std::string& config_path): paramer(config_path) {
     // debug his->camera_matrix and his->distort_coeffs
     cout << "Loaded camera matrix: \n" << this->camera_matrix << endl;
     cout << "Loaded distort coeffs: \n" << this->distort_coeffs << endl;
+
+    calibrateCamera_flags_ = yaml["calibrateCamera_flags"].as<int>();
 }
 
 bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
@@ -103,8 +105,7 @@ bool Calibrate::calibrate_camera() {
         distort_coeffs,
         rvecs,
         tvecs,
-        // cv::CALIB_FIX_K3,
-        0,
+        calibrateCamera_flags_,
         criteria
     ); // 由于视场角较小，不需要考虑k3
 
