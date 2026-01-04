@@ -1,5 +1,7 @@
 # 读取图像的设备，有 HIK 、 UVC 、 IMG 三种模式（海康相机，UVC协议的USB相机，图片）
 device: HIK
+# 相机标定参数 0:默认 0x00080: fix K3
+calibrateCamera_flags: 0x00080
 # 标定板类型 棋盘格： chessboard 对称圆： circles 非对称圆： acircles
 pattern: chessboard
 pattern_rows: 8 # 标定板行数（内角点数）
@@ -9,7 +11,7 @@ HIK:
   enable_frame_rate: false  # 是否锁帧
   frame_rate: 200           # 锁帧时的帧率
   exposure_time: 10000       # 曝光时间，单位：微秒
-  gain: 16.0                # 增益
+  gain: 10.0                # 增益
   adc_bit_depth: ADCBitDepth_8  # ADC位深，8或10
   pixel_format: BayerRG8    
 UVC:
@@ -29,5 +31,5 @@ distort_coeffs: [-0.023281262112283, 0.091482806312295, -0.00, 0.0000, 0.00000]
 
 # 串口参数
 Serial:
-  port_name: /dev/ttyACM0
+  port_name: /dev/rm_usb0
   baud_rate: 115200
