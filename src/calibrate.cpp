@@ -4,6 +4,9 @@
 #include <fmt/core.h>
 #include <iostream>
 #include <opencv2/core/mat.hpp>
+#include <filesystem>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 namespace qd::calibrate {
 
@@ -20,6 +23,23 @@ Calibrate::Calibrate(const std::string& config_path): paramer(config_path) {
     cout << "Loaded distort coeffs: \n" << this->distort_coeffs << endl;
 
     calibrateCamera_flags_ = yaml["calibrateCamera_flags"].as<int>();
+    
+    // 初始化保存路径
+    if (yaml["camera_calib_save_path"]) {
+        camera_calib_save_path = yaml["camera_calib_save_path"].as<std::string>();
+    } else {
+        camera_calib_save_path = "./camera_calib_images";
+    }
+    
+    if (yaml["handeye_calib_save_path"]) {
+        handeye_calib_save_path = yaml["handeye_calib_save_path"].as<std::string>();
+    } else {
+        handeye_calib_save_path = "./handeye_calib_data";
+    }
+    
+    // 创建保存目录
+    std::filesystem::create_directories(camera_calib_save_path);
+    std::filesystem::create_directories(handeye_calib_save_path);
 }
 
 bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
@@ -40,6 +60,8 @@ bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
             this->obj_points.push_back(object_points);
             this->img_points.push_back(pixel_points);
             this->collected_count++;
+            // 保存图片
+            save_camera_image(img, this->collected_count);
         }
     }
 
@@ -337,6 +359,9 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
 
         //计数
         this->collected_count++;
+
+        // 保存图片和姿态信息
+        save_handeye_data(img, q, this->collected_count);
 
         //debug
         std::cout << "gimbal rpy: " << eulers(q, 2, 1, 0).transpose() * 180 / M_PI << std::endl;
@@ -974,6 +999,214 @@ double Calibrate::calculate_reprojection_error(const std::vector<cv::Point2f>& p
         total_err += err * err;
     }
     return std::sqrt(total_err / pixel_points.size());
+}
+
+/**
+ * @brief 保存相机标定图片
+ * @param img 要保存的图像
+ * @param index 图片索引
+ */
+void Calibrate::save_camera_image(const cv::Mat& img, int index) {
+    std::string filename = camera_calib_save_path + "/image_" + 
+                          std::to_string(index) + ".jpg";
+    cv::imwrite(filename, img);
+    std::cout << "已保存相机标定图片: " << filename << std::endl;
+}
+
+/**
+ * @brief 保存手眼标定数据（图片和姿态信息）
+ * @param img 要保存的图像
+ * @param q 云台四元数
+ * @param index 数据索引
+ */
+void Calibrate::save_handeye_data(const cv::Mat& img, const Eigen::Quaterniond& q, int index) {
+    // 保存图片
+    std::string img_filename = handeye_calib_save_path + "/image_" + 
+                              std::to_string(index) + ".jpg";
+    cv::imwrite(img_filename, img);
+    
+    // 保存姿态信息到YAML文件
+    std::string pose_filename = handeye_calib_save_path + "/pose_" + 
+                               std::to_string(index) + ".yaml";
+    YAML::Node node;
+    
+    // 保存四元数 (w, x, y, z)
+    Eigen::Vector4d quat = q.coeffs(); // Eigen四元数格式: (x, y, z, w)
+    node["quaternion"] = std::vector<double>{
+        quat[3], quat[0], quat[1], quat[2]  // 保存为 (w, x, y, z)
+    };
+    node["quaternion"].SetStyle(YAML::EmitterStyle::Flow);
+    
+    // 保存RPY角度（度）
+    Eigen::Vector3d rpy = eulers(q, 2, 1, 0) * 180 / M_PI;
+    node["rpy_deg"] = std::vector<double>{rpy[0], rpy[1], rpy[2]};
+    node["rpy_deg"].SetStyle(YAML::EmitterStyle::Flow);
+    
+    // 保存RPY角度（弧度）
+    Eigen::Vector3d rpy_rad = eulers(q, 2, 1, 0);
+    node["rpy_rad"] = std::vector<double>{rpy_rad[0], rpy_rad[1], rpy_rad[2]};
+    node["rpy_rad"].SetStyle(YAML::EmitterStyle::Flow);
+    
+    // 保存旋转矩阵
+    Eigen::Matrix3d R = q.toRotationMatrix();
+    std::vector<double> R_data(9);
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            R_data[i * 3 + j] = R(i, j);
+        }
+    }
+    node["rotation_matrix"] = R_data;
+    node["rotation_matrix"].SetStyle(YAML::EmitterStyle::Flow);
+    
+    // 保存到文件
+    std::ofstream fout(pose_filename);
+    fout << node;
+    fout.close();
+    
+    std::cout << "已保存手眼标定数据: " << img_filename << ", " << pose_filename << std::endl;
+}
+
+/**
+ * @brief 从文件夹加载手眼标定数据
+ * @param folder_path 数据文件夹路径
+ * @return 是否成功加载
+ */
+bool Calibrate::load_handeye_data_from_folder(const std::string& folder_path) {
+    // 清空现有数据
+    obj_points.clear();
+    img_points.clear();
+    rvecs.clear();
+    tvecs.clear();
+    R_gimbal2world_list.clear();
+    t_gimbal2world_list.clear();
+    collected_count = 0;
+    
+    // 获取所有图片文件
+    std::vector<std::string> image_files;
+    cv::glob(folder_path + "/image_*.jpg", image_files);
+    cv::glob(folder_path + "/image_*.png", image_files);
+    cv::glob(folder_path + "/image_*.bmp", image_files);
+    
+    if (image_files.empty()) {
+        std::cerr << "未找到图片文件在路径: " << folder_path << std::endl;
+        return false;
+    }
+    
+    // 按文件名排序
+    std::sort(image_files.begin(), image_files.end());
+    
+    int loaded_count = 0;
+    for (const auto& img_path : image_files) {
+        // 提取索引号 - 使用字符串操作提取文件名和索引
+        std::string filename = img_path;
+        // 找到最后一个斜杠
+        size_t last_slash = filename.find_last_of("/\\");
+        if (last_slash != std::string::npos) {
+            filename = filename.substr(last_slash + 1);
+        }
+        // 移除扩展名
+        size_t last_dot = filename.find_last_of(".");
+        if (last_dot != std::string::npos) {
+            filename = filename.substr(0, last_dot);
+        }
+        // 提取索引号 (假设格式为 "image_123")
+        if (filename.substr(0, 6) != "image_") {
+            std::cerr << "警告: 文件名格式不正确: " << img_path << std::endl;
+            continue;
+        }
+        std::string index_str = filename.substr(6);
+        int index = std::stoi(index_str);
+        
+        // 读取对应的姿态文件
+        std::string pose_path = folder_path + "/pose_" + std::to_string(index) + ".yaml";
+        if (!std::filesystem::exists(pose_path)) {
+            std::cerr << "警告: 未找到对应的姿态文件: " << pose_path << std::endl;
+            continue;
+        }
+        
+        // 读取图片
+        cv::Mat img = cv::imread(img_path);
+        if (img.empty()) {
+            std::cerr << "警告: 无法读取图片: " << img_path << std::endl;
+            continue;
+        }
+        
+        // 读取姿态信息
+        YAML::Node pose_node;
+        try {
+            pose_node = YAML::LoadFile(pose_path);
+        } catch (const std::exception& e) {
+            std::cerr << "警告: 无法读取姿态文件: " << pose_path << ", 错误: " << e.what() << std::endl;
+            continue;
+        }
+        
+        if (!pose_node["quaternion"]) {
+            std::cerr << "警告: 姿态文件中缺少四元数信息: " << pose_path << std::endl;
+            continue;
+        }
+        
+        // 解析四元数
+        auto quat_data = pose_node["quaternion"].as<std::vector<double>>();
+        if (quat_data.size() != 4) {
+            std::cerr << "警告: 四元数格式错误: " << pose_path << std::endl;
+            continue;
+        }
+        Eigen::Quaterniond q(quat_data[0], quat_data[1], quat_data[2], quat_data[3]); // (w, x, y, z)
+        
+        // 检测标定板角点
+        std::vector<cv::Point2f> pixel_points;
+        std::vector<cv::Point3f> object_points;
+        bool found = collect_camera(img, pixel_points, object_points);
+        
+        if (!found) {
+            std::cerr << "警告: 在图片中未检测到标定板: " << img_path << std::endl;
+            continue;
+        }
+        
+        // 使用PnP求解相机位姿
+        cv::Mat rvec, tvec;
+        if (!cv::solvePnP(
+                object_points,
+                pixel_points,
+                this->camera_matrix,
+                this->distort_coeffs,
+                rvec,
+                tvec,
+                false,
+                cv::SOLVEPNP_IPPE
+            ))
+        {
+            std::cerr << "警告: PnP求解失败: " << img_path << std::endl;
+            continue;
+        }
+        
+        // 保存数据
+        this->obj_points.push_back(object_points);
+        this->img_points.push_back(pixel_points);
+        this->rvecs.push_back(rvec);
+        this->tvecs.push_back(tvec);
+        
+        // 计算云台的旋转矩阵
+        Eigen::Matrix3d R_gimbal2world = q.toRotationMatrix();
+        cv::Mat t_gimbal2world = (cv::Mat_<double>(3, 1) << 0, 0, 0);
+        cv::Mat R_gimbal2world_cv;
+        cv::eigen2cv(R_gimbal2world, R_gimbal2world_cv);
+        
+        this->R_gimbal2world_list.emplace_back(R_gimbal2world_cv);
+        this->t_gimbal2world_list.emplace_back(t_gimbal2world);
+        
+        loaded_count++;
+    }
+    
+    collected_count = loaded_count;
+    std::cout << "成功加载 " << loaded_count << " 组手眼标定数据" << std::endl;
+    
+    if (loaded_count == 0) {
+        std::cerr << "错误: 未能加载任何有效数据" << std::endl;
+        return false;
+    }
+    
+    return true;
 }
 
 } // namespace qd::calibrate

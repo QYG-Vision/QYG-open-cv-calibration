@@ -15,7 +15,9 @@ using namespace qd;
 
 const std::string keys =
     "{help h usage ? |                          | 输出命令行参数说明}"
-    "{config-path c  | config/calibration.yaml | yaml配置文件路径 }";
+    "{config-path c  | config/calibration.yaml | yaml配置文件路径 }"
+    "{load-data l    |                          | 从文件夹加载已保存的手眼标定数据 }"
+    "{data-path d    | ./handeye_calib_data     | 手眼标定数据文件夹路径 }";
 
 /**
     @brief 加载设备
@@ -47,12 +49,28 @@ int main(int argc, char* argv[]) {
     }
 
     auto config_path = cli.get<std::string>("config-path");
+    bool load_data = cli.has("load-data");
+    auto data_path = cli.get<std::string>("data-path");
 
-    // 初始化设备
-    auto device = load_device(config_path);
     // 初始化标定类
     auto calibrate_ = qd::calibrate::Calibrate(config_path);
 
+    // 如果指定了从文件夹加载数据，则直接加载并标定
+    if (load_data) {
+        std::cout << "从文件夹加载手眼标定数据: " << data_path << std::endl;
+        if (calibrate_.load_handeye_data_from_folder(data_path)) {
+            std::cout << "开始计算手眼标定参数..." << std::endl;
+            calibrate_.calibrate_handeye();
+            std::cout << "标定完成，程序退出" << std::endl;
+            return 0;
+        } else {
+            std::cerr << "加载数据失败，程序退出" << std::endl;
+            return 1;
+        }
+    }
+
+    // 初始化设备
+    auto device = load_device(config_path);
     // 手眼标定串口
     std::unique_ptr<Serial_driver> protocol_ = std::make_unique<Serial_driver>(config_path);
 

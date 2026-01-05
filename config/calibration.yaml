@@ -33,3 +33,7 @@ distort_coeffs: [-0.023281262112283, 0.091482806312295, -0.00, 0.0000, 0.00000]
 Serial:
   port_name: /dev/rm_usb0
   baud_rate: 115200
+
+# 标定数据保存路径
+camera_calib_save_path: ./camera_calib_images  # 相机标定图片保存路径
+handeye_calib_save_path: ./handeye_calib_data   # 手眼标定数据保存路径（包含图片和姿态信息）

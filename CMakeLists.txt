@@ -43,7 +43,18 @@ else()
   message(FATAL_ERROR "Unsupported architecture: ${CMAKE_HOST_SYSTEM_PROCESSOR}!")
 endif()
 
-target_link_libraries(calibrateCamera PRIVATE ${OpenCV_LIBS} yaml-cpp MvCameraControl fmt::fmt)
-target_link_libraries(calculateError PRIVATE ${OpenCV_LIBS} yaml-cpp MvCameraControl fmt::fmt)
-target_link_libraries(calibrateHandEye PRIVATE ${OpenCV_LIBS} yaml-cpp MvCameraControl fmt::fmt)
-target_link_libraries(validateHandEye PRIVATE ${OpenCV_LIBS} yaml-cpp MvCameraControl fmt::fmt)
+# 检查是否需要链接filesystem库
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.0")
+    # GCC < 9.0 不需要显式链接
+else()
+    # GCC >= 9.0 和 Clang 需要链接 filesystem
+    find_library(FILESYSTEM_LIB stdc++fs)
+    if(FILESYSTEM_LIB)
+        set(FILESYSTEM_LIBS ${FILESYSTEM_LIB})
+    endif()
+endif()
+
+target_link_libraries(calibrateCamera PRIVATE ${OpenCV_LIBS} yaml-cpp MvCameraControl fmt::fmt ${FILESYSTEM_LIBS})
+target_link_libraries(calculateError PRIVATE ${OpenCV_LIBS} yaml-cpp MvCameraControl fmt::fmt ${FILESYSTEM_LIBS})
+target_link_libraries(calibrateHandEye PRIVATE ${OpenCV_LIBS} yaml-cpp MvCameraControl fmt::fmt ${FILESYSTEM_LIBS})
+target_link_libraries(validateHandEye PRIVATE ${OpenCV_LIBS} yaml-cpp MvCameraControl fmt::fmt ${FILESYSTEM_LIBS})

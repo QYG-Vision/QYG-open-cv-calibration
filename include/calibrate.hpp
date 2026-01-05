@@ -84,6 +84,12 @@ public:
     bool load_handeye_calibration(const std::string& handeye_yaml_path);
     void validate_handeye(cv::Mat& img, const Eigen::Quaterniond& gimbal_quaternion);
     void reset_validation_stats(); // 重置验证统计信息
+    
+    // 保存和加载标定数据
+    void save_camera_image(const cv::Mat& img, int index); // 保存相机标定图片
+    void save_handeye_data(const cv::Mat& img, const Eigen::Quaterniond& q, int index); // 保存手眼标定数据（图片+姿态）
+    bool load_handeye_data_from_folder(const std::string& folder_path); // 从文件夹加载手眼标定数据
+    
 private:
     void saveCalibrationYAML(
         const cv::Size& image_size,
@@ -131,6 +137,10 @@ private:
 
     cv::TickMeter tm; // 延迟计时器
     int collected_count = 0; // 已采集的标定图像数量
+    
+    // 数据保存路径
+    std::string camera_calib_save_path; // 相机标定图片保存路径
+    std::string handeye_calib_save_path; // 手眼标定数据保存路径
 };
 
 static double limit_rad(double angle) {
