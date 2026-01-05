@@ -77,7 +77,8 @@ int main(int argc, char* argv[]) {
     namedWindow("手眼标定");
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
-    std::cout << "开始标定，按 'c' 键开始计算标定参数，按 's' 键采集数据，按 'ESC' 键退出" << std::endl;
+    std::cout << "开始标定，按 'c' 键开始计算标定参数，按 's' 键采集数据，按 'ESC' 键退出"
+              << std::endl;
     while (true) {
         // 获取图像和串口数据
         Mat img;
@@ -104,17 +105,17 @@ int main(int argc, char* argv[]) {
             device.reset();
             break;
         } // 标定
-        else if (key == 's') {
+        else if (key == 's')
+        {
             calibrate_.collect_handeye(img_back, q, true);
-            
+
         } // 采集
-        else if (key == 27) {
+        else if (key == 27)
+        {
             break;
         }
-
     }
 
-    
     std::cout << "标定完成，程序退出" << std::endl;
     return 0;
 }

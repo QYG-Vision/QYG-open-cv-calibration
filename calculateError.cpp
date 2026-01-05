@@ -54,10 +54,9 @@ int main(int argc, char* argv[]) {
     // 初始化标定类
     auto calibrate_ = qd::calibrate::Calibrate(config_path);
 
-
     namedWindow("重投影误差");
     std::chrono::steady_clock::time_point timestamp;
-    int count=0;
+    int count = 0;
     while (true) {
         // 获取图像和串口数据
         Mat img;
@@ -66,9 +65,9 @@ int main(int argc, char* argv[]) {
         // 检查图像
         if (img.empty()) {
             cout << "image is empty" << endl;
-            if(count++>10){
+            if (count++ > 10) {
                 break;
-            }// 11次没获取到图像，退出
+            } // 11次没获取到图像，退出
             continue;
         }
 
@@ -77,6 +76,5 @@ int main(int argc, char* argv[]) {
         waitKey(wait_time);
     }
 
-    
     return 0;
 }

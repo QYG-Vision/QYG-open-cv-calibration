@@ -1,10 +1,10 @@
-#include <Eigen/Dense> 
 #include "thread_safe_queue.hpp"
 #include "uart_transporter.hpp"
+#include <Eigen/Dense>
+#include <fmt/core.h>
 #include <memory>
 #include <thread>
 #include <yaml-cpp/yaml.h>
-#include <fmt/core.h>
 
 #define capacity 16
 struct IMUData {
@@ -31,5 +31,5 @@ private:
     std::unique_ptr<UartTransporter> uart_transporter;
     tools::ThreadSafeQueue<IMUData> queue_;
     std::thread daemon_thread_;
-    std::atomic<bool> running_{true};
+    std::atomic<bool> running_ { true };
 };

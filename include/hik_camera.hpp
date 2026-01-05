@@ -12,7 +12,6 @@
 namespace qd::Device {
 
 class Hik_Camera: public Device {
-
 public:
     Hik_Camera(const std::string& config_path);
     ~Hik_Camera();
@@ -27,7 +26,7 @@ private:
     cv::Mat image;
     tools::ThreadSafeQueue<CameraData> queue_;
     std::thread daemon_thread_;
-    std::atomic<bool> running_{true};
+    std::atomic<bool> running_ { true };
 };
 
 } // namespace qd::Device

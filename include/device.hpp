@@ -4,7 +4,7 @@
 
 namespace qd {
 namespace Device {
-    
+
     struct CameraData {
         cv::Mat img;
         std::chrono::steady_clock::time_point timestamp;

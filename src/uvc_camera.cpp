@@ -33,7 +33,7 @@ UVC_Camera::UVC_Camera(const std::string& config_path): queue_(1) {
                 std::cerr << "Warning: Captured empty frame from UVC camera." << std::endl;
                 continue;
             }
-            queue_.push({img,timestamp});
+            queue_.push({ img, timestamp });
         }
     });
 }
@@ -52,11 +52,11 @@ cv::Mat UVC_Camera::get_image() {
     return data.img;
 }
 
-void UVC_Camera::read(cv::Mat& img, std::chrono::steady_clock::time_point& timestamp){
-  CameraData data;
-  queue_.pop(data);
+void UVC_Camera::read(cv::Mat& img, std::chrono::steady_clock::time_point& timestamp) {
+    CameraData data;
+    queue_.pop(data);
 
-  img = data.img;
-  timestamp = data.timestamp;
+    img = data.img;
+    timestamp = data.timestamp;
 }
 } // namespace qd::Device

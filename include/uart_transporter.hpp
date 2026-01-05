@@ -23,7 +23,6 @@
 #include <string>
 // project
 
-
 // 串口数据传输设备，符合通用传输接口。
 class UartTransporter {
 public:
@@ -74,6 +73,5 @@ private:
     int stopbits_;
     int parity_;
 };
-
 
 #endif // SERIAL_DRIVER_UART_TRANSPORTER_HPP_

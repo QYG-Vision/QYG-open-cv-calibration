@@ -28,7 +28,6 @@
 #include <termios.h> /*PPSIX 终端控制定义*/
 #include <unistd.h> /*Unix 标准函数定义*/
 
-
 bool UartTransporter::setParam(int speed, int flow_ctrl, int databits, int stopbits, int parity) {
     // 设置串口数据帧格式
     int speed_arr[] = { B921600, B115200, B19200, B9600, B4800, B2400, B1200, B300 };
@@ -193,4 +192,3 @@ int UartTransporter::write(const void* buffer, size_t len) {
     int ret = ::write(fd_, buffer, len);
     return ret;
 }
-

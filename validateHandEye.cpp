@@ -67,12 +67,12 @@ int main(int argc, char* argv[]) {
     namedWindow("手眼标定验证", WINDOW_NORMAL);
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
-    
+
     std::cout << "手眼标定验证程序启动" << std::endl;
     std::cout << "验证方法：位置一致性验证法" << std::endl;
     std::cout << "说明：固定标定板，旋转云台，观察标定板在世界坐标系下的位置是否一致" << std::endl;
     std::cout << "按 'r' 键重置统计，按 'ESC' 键退出" << std::endl;
-    
+
     while (true) {
         // 获取图像和串口数据
         Mat img;
@@ -87,7 +87,7 @@ int main(int argc, char* argv[]) {
 
         // 验证手眼标定
         calibrate_.validate_handeye(img, q);
-        
+
         // 显示云台姿态（用于参考）
         // calibrate_.display_rpy(img, q);
 
@@ -107,4 +107,3 @@ int main(int argc, char* argv[]) {
     std::cout << "验证程序退出" << std::endl;
     return 0;
 }
-

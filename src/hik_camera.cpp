@@ -14,7 +14,8 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
     MV_CC_DEVICE_INFO_LIST device_list;
     nRet = MV_CC_EnumDevices(MV_USB_DEVICE, &device_list);
     if (nRet == MV_OK)
-        std::cout << std::hex << "Found camera count = " << device_list.nDeviceNum << std::dec << std::endl;
+        std::cout << std::hex << "Found camera count = " << device_list.nDeviceNum << std::dec
+                  << std::endl;
     // 等待设备连接
     while (device_list.nDeviceNum == 0) {
         std::cout << "No camera found!" << std::endl;
@@ -74,9 +75,9 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
             // 打上时间戳
             auto timestamp = std::chrono::steady_clock::now();
             std::chrono::duration<double, std::micro> half_exposure(exposure_time_ / 2.0);
-            timestamp = timestamp + 
-            std::chrono::duration_cast<std::chrono::steady_clock::duration>(half_exposure);
-            
+            timestamp = timestamp
+                + std::chrono::duration_cast<std::chrono::steady_clock::duration>(half_exposure);
+
             if (nRet != MV_OK) {
                 std::cout << std::hex << "No image data: " << nRet << std::dec << std::endl;
                 continue;
@@ -93,8 +94,8 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
                 raw.pBufAddr
             );
 
-            
-            // unsigned char *pDataForRGB = (unsigned char*)malloc(raw.stFrameInfo.nExtendWidth * raw.stFrameInfo.nExtendHeight * 4 + 2048);
+            // unsigned char *pDataForRGB = (unsigned char*)malloc(raw.stFrameInfo.nExtendWidth *
+            // raw.stFrameInfo.nExtendHeight * 4 + 2048);
             MV_CC_PIXEL_CONVERT_PARAM cvt_param;
             cvt_param.nWidth = raw.stFrameInfo.nWidth;
             cvt_param.nHeight = raw.stFrameInfo.nHeight;
@@ -105,7 +106,8 @@ Hik_Camera::Hik_Camera(const std::string& config_path): queue_(1) {
 
             cvt_param.pDstBuffer = img.data;
             // cvt_param.pDstBuffer = pDataForRGB;
-            cvt_param.nDstBufferSize = raw.stFrameInfo.nExtendWidth * raw.stFrameInfo.nExtendHeight * 4 + 2048;
+            cvt_param.nDstBufferSize =
+                raw.stFrameInfo.nExtendWidth * raw.stFrameInfo.nExtendHeight * 4 + 2048;
             cvt_param.enDstPixelType = PixelType_Gvsp_BGR8_Packed;
             // nRet = MV_CC_ConvertPixelType(camera_handle_, &cvt_param);
             // cv::Mat dst_image(
@@ -141,12 +143,12 @@ cv::Mat Hik_Camera::get_image() {
     return data.img;
 }
 
-void Hik_Camera::read(cv::Mat& img, std::chrono::steady_clock::time_point& timestamp){
-  CameraData data;
-  queue_.pop(data);
+void Hik_Camera::read(cv::Mat& img, std::chrono::steady_clock::time_point& timestamp) {
+    CameraData data;
+    queue_.pop(data);
 
-  img = data.img;
-  timestamp = data.timestamp;
+    img = data.img;
+    timestamp = data.timestamp;
 }
 
 } // namespace qd::Device

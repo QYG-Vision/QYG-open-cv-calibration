@@ -11,13 +11,13 @@ Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
 
     auto port_name = yaml["Serial"]["port_name"].as<std::string>();
     auto baud_rate = yaml["Serial"]["baud_rate"].as<int>();
-    
-    //debug
+
+    // debug
     fmt::print("import port_name: {} \n", port_name);
     fmt::print("import baud_rate: {} \n", baud_rate);
 
     uart_transporter = std::make_unique<UartTransporter>(port_name, baud_rate);
-    
+
     while (!uart_transporter->open()) {
         fmt::print("serial open failed, retrying... \n");
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -25,7 +25,7 @@ Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
 
     // queue_.push(data_ahead_);
     // queue_.push(data_behind_);
-    
+
     daemon_thread_ = std::thread([this]() {
         while (running_) {
             int recv_len = uart_transporter->read(tmp_buffer_, capacity);
@@ -44,17 +44,15 @@ Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
             auto pitch = (int16_t)((tmp_buffer_[4] << 8) | tmp_buffer_[5]) / 1e2;
             auto yaw = (int16_t)((tmp_buffer_[6] << 8) | tmp_buffer_[7]) / 1e2;
             auto p = rpyToQuat(roll, pitch, yaw);
-            
-            
+
             // fmt::print("receve roll: {} 度, pitch: {} 度,yaw: {} 度 \n", roll, pitch, yaw);
             queue_.push({ p, roll, pitch, yaw, timestamp });
         }
     });
     fmt::print("open serial finish \n");
-
 }
 
-Serial_driver::~Serial_driver(){
+Serial_driver::~Serial_driver() {
     running_ = false;
     if (daemon_thread_.joinable())
         daemon_thread_.join();
@@ -93,7 +91,7 @@ Eigen::Quaterniond Serial_driver::rpyToQuat(double roll, double pitch, double ya
     roll = roll * M_PI / 180;
     pitch = pitch * M_PI / 180;
     yaw = yaw * M_PI / 180;
-    
+
     Eigen::AngleAxisd rollAngle(roll, Eigen::Vector3d::UnitX());
     Eigen::AngleAxisd pitchAngle(pitch, Eigen::Vector3d::UnitY());
     Eigen::AngleAxisd yawAngle(yaw, Eigen::Vector3d::UnitZ());
@@ -101,6 +99,4 @@ Eigen::Quaterniond Serial_driver::rpyToQuat(double roll, double pitch, double ya
     // 注意顺序：Z * Y * X，对应 yaw-pitch-roll
     Eigen::Quaterniond q = yawAngle * pitchAngle * rollAngle;
     return q.normalized();
-
-
 }
