@@ -86,6 +86,14 @@ Eigen::Quaterniond Serial_driver::read(std::chrono::steady_clock::time_point tim
     return q_a;
 }
 
+/**
+ * @brief 欧拉角转四元数，输入角度制    
+ * 
+ * @param roll 
+ * @param pitch 
+ * @param yaw 
+ * @return Eigen::Quaterniond 归一化的四元数
+ */
 Eigen::Quaterniond Serial_driver::rpyToQuat(double roll, double pitch, double yaw) {
     // 转弧度
     roll = roll * M_PI / 180;

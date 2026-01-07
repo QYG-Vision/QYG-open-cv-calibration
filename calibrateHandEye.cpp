@@ -73,7 +73,7 @@ int main(int argc, char* argv[]) {
     auto device = load_device(config_path);
     // 手眼标定串口
     std::unique_ptr<Serial_driver> protocol_ = std::make_unique<Serial_driver>(config_path);
-
+    
     namedWindow("手眼标定");
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
@@ -84,7 +84,6 @@ int main(int argc, char* argv[]) {
         Mat img;
         device->read(img, timestamp);
         q = protocol_->read(timestamp);
-        calibrate_.display_rpy(img, q); // 可视化角度
 
         // 检查图像
         if (img.empty()) {
@@ -92,11 +91,8 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        cv::Mat img_back;
-        img_back = img.clone();
-        calibrate_.collect_handeye(img, q);
 
-        imshow("手眼标定", img);
+        // 处理键盘输入
         int key = waitKey(10);
         if (key == 'c') {
             calibrate_.calibrate_handeye();
@@ -107,13 +103,19 @@ int main(int argc, char* argv[]) {
         } // 标定
         else if (key == 's')
         {
-            calibrate_.collect_handeye(img_back, q, true);
+            calibrate_.collect_handeye(img, q, true);
 
         } // 采集
         else if (key == 27)
         {
             break;
         }
+
+        calibrate_.collect_handeye(img, q);
+        calibrate_.show_collected_corners(img);
+        calibrate_.display_rpy(img, q); // 可视化角度
+
+        imshow("手眼标定", img);
     }
 
     std::cout << "标定完成，程序退出" << std::endl;

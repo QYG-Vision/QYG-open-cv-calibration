@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fmt/core.h>
 #include <iostream>
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core/mat.hpp>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -182,14 +183,13 @@ vector<Point3f> Calibrate::calcChessboardCorners(std::vector<cv::Point2f>& pixel
         case CIRCLES_GRID:
             for (int i = 0; i < boardSize.height; i++)
                 for (int j = 0; j < boardSize.width; j++)
-                    corners.push_back(Point3f(float(j * squareSize), float(i * squareSize), 0));
+                    corners.emplace_back(float(j * squareSize), float(i * squareSize), 0);
             break;
 
         case ASYMMETRIC_CIRCLES_GRID:
             for (int i = 0; i < boardSize.height; i++)
                 for (int j = 0; j < boardSize.width; j++)
-                    corners.push_back(
-                        Point3f(float((2 * j + i % 2) * squareSize), float(i * squareSize), 0)
+                    corners.emplace_back(float((2 * j + i % 2) * squareSize), float(i * squareSize), 0
                     );
             break;
 
@@ -541,6 +541,10 @@ void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d
     std::cout << out.c_str() << std::endl;
 }
 
+/**
+ * @brief 显示重投影误差
+ * @param img 输入图像
+ */
 void Calibrate::display_error(cv::Mat& img) {
     // 获得标定点
     std::vector<Point2f> pixel_points;
@@ -671,7 +675,7 @@ bool Calibrate::load_handeye_calibration(const std::string& handeye_yaml_path) {
         if (yaml["t_camera2gimbal"]) {
             auto t_data = yaml["t_camera2gimbal"].as<std::vector<double>>();
             if (t_data.size() == 3) {
-                t_camera2gimbal = cv::Mat(3, 1, CV_64F, t_data.data()).clone();
+                t_camera2gimbal = cv::Mat(3, 1, CV_64F, t_data.data()).clone() * 1e3; // m to mm
             } else {
                 std::cerr << "t_camera2gimbal数据格式错误，需要3个元素" << std::endl;
                 return false;
@@ -808,10 +812,10 @@ void Calibrate::validate_handeye(cv::Mat& img, const Eigen::Quaterniond& gimbal_
     Eigen::Matrix3d R_board2world_eigen;
     cv::cv2eigen(R_board2world, R_board2world_eigen);
     Eigen::Quaterniond q_board2world(R_board2world_eigen);
-    Eigen::Vector3d rpy_board2world = eulers(q_board2world, 2, 1, 0) * 180 / M_PI;
+    Eigen::Vector3d ypr_board2world = eulers(q_board2world, 2, 1, 0) * 180 / M_PI;
 
     // 获取云台的欧拉角（世界坐标系）
-    Eigen::Vector3d rpy_gimbal = eulers(gimbal_quaternion, 2, 1, 0) * 180 / M_PI;
+    Eigen::Vector3d ypr_gimbal = eulers(gimbal_quaternion, 2, 1, 0) * 180 / M_PI;
 
     // 计算位置误差（距离）- 标定板到云台的距离
     double position_error = cv::norm(t_board2gimbal);
@@ -837,9 +841,9 @@ void Calibrate::validate_handeye(cv::Mat& img, const Eigen::Quaterniond& gimbal_
         img,
         fmt::format(
             "Gimbal RPY (World): Y{:.2f} P{:.2f} R{:.2f} deg",
-            rpy_gimbal[0],
-            rpy_gimbal[1],
-            rpy_gimbal[2]
+            ypr_gimbal[0],
+            ypr_gimbal[1],
+            ypr_gimbal[2]
         ),
         { 40, y_offset },
         cv::FONT_HERSHEY_SIMPLEX,
@@ -874,9 +878,9 @@ void Calibrate::validate_handeye(cv::Mat& img, const Eigen::Quaterniond& gimbal_
         img,
         fmt::format(
             "Board2World RPY: Y{:.2f} P{:.2f} R{:.2f} deg",
-            rpy_board2world[0],
-            rpy_board2world[1],
-            rpy_board2world[2]
+            ypr_board2world[0],
+            ypr_board2world[1],
+            ypr_board2world[2]
         ),
         { 40, y_offset },
         cv::FONT_HERSHEY_SIMPLEX,
@@ -1218,6 +1222,17 @@ bool Calibrate::load_handeye_data_from_folder(const std::string& folder_path) {
     }
 
     return true;
+}
+
+/**
+ * @brief 显示已采集的标定板位置，用于手眼标定确认收集情况
+ * 
+ * @param img 
+ */
+void Calibrate::show_collected_corners(cv::Mat &img){
+    for(auto & corners : this->img_points){
+        cv::drawChessboardCorners(img, this->paramer.boardSize, Mat(corners), true);
+    }
 }
 
 } // namespace qd::calibrate

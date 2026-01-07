@@ -76,11 +76,6 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        cv::Mat img_back;
-
-        calibrate_.collect_camera(img);
-
-        imshow("相机标定", img);
         int key = waitKey(wait_time);
         if (key == 'c') {
             if (calibrate_.calibrate_camera()) {
@@ -94,6 +89,10 @@ int main(int argc, char* argv[]) {
         } else if (key == 27) {
             break;
         }
+
+        calibrate_.collect_camera(img);
+
+        imshow("相机标定", img);
     }
 
     device.reset();
