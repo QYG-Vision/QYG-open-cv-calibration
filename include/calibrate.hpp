@@ -74,6 +74,7 @@ public:
 
     bool display_rpy(cv::Mat& img, const Eigen::Quaterniond& q);
     void display_error(cv::Mat& img);
+    void show_collected_corners(cv::Mat &img);
 
     double calculate_reprojection_error(
         const std::vector<cv::Point2f>& pixel_points,
