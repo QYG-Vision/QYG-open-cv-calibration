@@ -75,9 +75,7 @@ bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
     return true;
 }
 
-/**
-    @brief 获取标定板角点
-*/
+
 bool Calibrate::collect_camera(
     IN Mat& img,
     OUT std::vector<Point2f>& pixel_points,
@@ -100,9 +98,7 @@ bool Calibrate::collect_camera(
     return false;
 }
 
-/**
-    @brief 对采集到的数据进行相机标定
-*/
+
 bool Calibrate::calibrate_camera() {
     if (obj_points.size() < 1) {
         std::cerr << "Not enough data for calibration. Need at least 1 valid image." << std::endl;
@@ -169,9 +165,7 @@ bool Calibrate::calibrate_camera() {
     collected_count = 0;
     return true;
 }
-/**
-    @brief 输入 2D 标定角点获得标定板坐标系点位
-*/
+
 vector<Point3f> Calibrate::calcChessboardCorners(std::vector<cv::Point2f>& pixel_points) {
     vector<Point3f> corners;
 
@@ -199,9 +193,7 @@ vector<Point3f> Calibrate::calcChessboardCorners(std::vector<cv::Point2f>& pixel
     return corners;
 }
 
-/**
-    @brief 查找 2D 标定角点
-*/
+
 bool Calibrate::find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pixel_points) {
     Mat img_gray;
     cv::cvtColor(img, img_gray, COLOR_BGR2GRAY);
@@ -233,14 +225,7 @@ bool Calibrate::find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pi
     return found;
 }
 
-/**
- * @brief 保存相机标定结果到 YAML 文件
- *
- * @param image_size 图像大小 (cv::Size(width, height))
- * @param camera_matrix 相机内参矩阵 (3x3)
- * @param dist_coeffs 畸变系数 (1xN，通常5个或8个)
- * @param filename 输出的YAML文件路径
- */
+
 void Calibrate::saveCalibrationYAML(
     const cv::Size& image_size,
     const cv::Mat& camera_matrix,
@@ -316,10 +301,7 @@ void Calibrate::saveCalibrationYAML(
     std::cout << "标定结果已保存到 " << filename << std::endl;
 }
 
-/**
-    @brief 收集手眼标定数据
-    @param enable_collect 是否收集数据
-*/
+
 void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool enable_collect) {
     // 获得标定点
     std::vector<Point2f> pixel_points;
@@ -380,9 +362,6 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
     putText(img, text, Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
 }
 
-/**
-    @brief 可视化输入的云台欧拉角
-*/
 bool Calibrate::display_rpy(cv::Mat& img, const Eigen::Quaterniond& q) {
     // 可视化
     // Eigen::Vector3d rpy = q.toRotationMatrix().eulerAngles(0, 1, 2)* 180 / M_PI;
@@ -412,9 +391,7 @@ bool Calibrate::display_rpy(cv::Mat& img, const Eigen::Quaterniond& q) {
     return true;
 }
 
-/**
-    @brief 对收集到的数据进行手眼标定
-*/
+
 void Calibrate::calibrate_handeye() {
     // 手眼标定
     std::cout << "Start calibrate_handeye !!! " << std::endl;
@@ -453,9 +430,7 @@ void Calibrate::calibrate_handeye() {
     saveHandEyeCalibrationYAML(R_camera2gimbal, t_camera2gimbal, rpy, "handeye_calibration.yaml");
 }
 
-/**
-    @brief 输出手眼标定数据
-*/
+
 void Calibrate::print_yaml(
     const cv::Mat& R_camera2gimbal,
     const cv::Mat& t_camera2gimbal,
@@ -492,9 +467,7 @@ void Calibrate::print_yaml(
     fmt::print("\n{}\n", result.c_str());
 }
 
-/**
-    @brief 输出手眼标定数据
-*/
+
 void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d& rpy) {
     // 1. 格式化 xyz 字符串: "x y z"
     std::stringstream ss_xyz;
@@ -541,10 +514,6 @@ void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d
     std::cout << out.c_str() << std::endl;
 }
 
-/**
- * @brief 显示重投影误差
- * @param img 输入图像
- */
 void Calibrate::display_error(cv::Mat& img) {
     // 获得标定点
     std::vector<Point2f> pixel_points;
@@ -607,13 +576,7 @@ void Calibrate::display_error(cv::Mat& img) {
     }
 }
 
-/**
- * @brief 保存手眼标定结果到YAML文件
- * @param R_camera2gimbal 相机到云台的旋转矩阵
- * @param t_camera2gimbal 相机到云台的平移向量
- * @param rpy 相机同理想情况的偏角
- * @param filename 输出的YAML文件路径
- */
+
 void Calibrate::saveHandEyeCalibrationYAML(
     const cv::Mat& R_camera2gimbal,
     const cv::Mat& t_camera2gimbal,
@@ -648,11 +611,7 @@ void Calibrate::saveHandEyeCalibrationYAML(
     std::cout << "手眼标定结果已保存到 " << filename << std::endl;
 }
 
-/**
- * @brief 从YAML文件加载手眼标定结果
- * @param handeye_yaml_path 手眼标定结果YAML文件路径
- * @return 是否成功加载
- */
+
 bool Calibrate::load_handeye_calibration(const std::string& handeye_yaml_path) {
     try {
         auto yaml = YAML::LoadFile(handeye_yaml_path);
@@ -696,11 +655,6 @@ bool Calibrate::load_handeye_calibration(const std::string& handeye_yaml_path) {
     }
 }
 
-/**
- * @brief 验证手眼标定准确性
- * @param img 输入图像
- * @param gimbal_quaternion 云台四元数（用于对比）
- */
 void Calibrate::validate_handeye(cv::Mat& img, const Eigen::Quaterniond& gimbal_quaternion) {
     if (!handeye_loaded) {
         cv::putText(
@@ -984,19 +938,11 @@ void Calibrate::validate_handeye(cv::Mat& img, const Eigen::Quaterniond& gimbal_
     }
 }
 
-/**
- * @brief 重置验证统计信息
- */
 void Calibrate::reset_validation_stats() {
     world_positions_history.clear();
 }
 
-/**
-    @brief 计算重投影误差
-    @param object_points 3D 物体点
-    @param pixel_points 2D 像素点
-    @return 重投影误差
-*/
+
 double Calibrate::calculate_reprojection_error(
     const std::vector<cv::Point2f>& pixel_points,
     const std::vector<cv::Point2f>& projected_points
@@ -1009,23 +955,13 @@ double Calibrate::calculate_reprojection_error(
     return std::sqrt(total_err / pixel_points.size());
 }
 
-/**
- * @brief 保存相机标定图片
- * @param img 要保存的图像
- * @param index 图片索引
- */
 void Calibrate::save_camera_image(const cv::Mat& img, int index) {
     std::string filename = camera_calib_save_path + "/image_" + std::to_string(index) + ".jpg";
     cv::imwrite(filename, img);
     std::cout << "已保存相机标定图片: " << filename << std::endl;
 }
 
-/**
- * @brief 保存手眼标定数据（图片和姿态信息）
- * @param img 要保存的图像
- * @param q 云台四元数
- * @param index 数据索引
- */
+
 void Calibrate::save_handeye_data(const cv::Mat& img, const Eigen::Quaterniond& q, int index) {
     // 保存图片
     std::string img_filename = handeye_calib_save_path + "/image_" + std::to_string(index) + ".jpg";
@@ -1075,11 +1011,7 @@ void Calibrate::save_handeye_data(const cv::Mat& img, const Eigen::Quaterniond& 
     std::cout << "已保存手眼标定数据: " << img_filename << ", " << pose_filename << std::endl;
 }
 
-/**
- * @brief 从文件夹加载手眼标定数据
- * @param folder_path 数据文件夹路径
- * @return 是否成功加载
- */
+
 bool Calibrate::load_handeye_data_from_folder(const std::string& folder_path) {
     // 清空现有数据
     obj_points.clear();
@@ -1224,11 +1156,6 @@ bool Calibrate::load_handeye_data_from_folder(const std::string& folder_path) {
     return true;
 }
 
-/**
- * @brief 显示已采集的标定板位置，用于手眼标定确认收集情况
- * 
- * @param img 
- */
 void Calibrate::show_collected_corners(cv::Mat &img){
     for(auto & corners : this->img_points){
         cv::drawChessboardCorners(img, this->paramer.boardSize, Mat(corners), true);

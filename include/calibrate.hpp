@@ -59,55 +59,146 @@ public:
     Calibrate(const std::string& config_path);
 
     bool collect_camera(Mat& img, bool enable_collect = false);
+
+    /**
+    @brief 获取标定板角点
+    */
     bool collect_camera(
         IN Mat& img,
         OUT std::vector<Point2f>& pixel_points,
         OUT vector<Point3f>& object_points
     );
+
+    /**
+    @brief 收集手眼标定数据
+    @param enable_collect 是否收集数据
+    */
     void collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool enable_collect = false);
 
+    /**
+    @brief 对采集到的数据进行相机标定
+    */
     bool calibrate_camera();
+    /**
+    @brief 对收集到的数据进行手眼标定
+    */
     void calibrate_handeye();
 
+    /**
+    @brief 输入 2D 标定角点获得标定板坐标系点位
+    */
     vector<Point3f> calcChessboardCorners(std::vector<cv::Point2f>& pixel_points);
+
+    /**
+    @brief 查找 2D 标定角点
+    */  
     bool find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pixel_points);
 
+    /**
+    @brief 可视化输入的云台欧拉角
+    */
     bool display_rpy(cv::Mat& img, const Eigen::Quaterniond& q);
+    /**
+    * @brief 显示重投影误差
+    * @param img 输入图像
+    */
     void display_error(cv::Mat& img);
-    void show_collected_corners(cv::Mat &img);
 
+    /**
+    * @brief 显示已采集的标定板位置，用于手眼标定确认收集情况
+    * 
+    * @param img 
+    */
+    void show_collected_corners(cv::Mat& img);
+
+    /**
+        @brief 计算重投影误差
+        @param object_points 3D 物体点
+        @param pixel_points 2D 像素点
+        @return 重投影误差
+    */
     double calculate_reprojection_error(
         const std::vector<cv::Point2f>& pixel_points,
         const std::vector<cv::Point2f>& projected_points
     );
 
     // 手眼标定验证相关方法
+    /**
+    * @brief 从YAML文件加载手眼标定结果
+    * @param handeye_yaml_path 手眼标定结果YAML文件路径
+    * @return 是否成功加载
+    */
     bool load_handeye_calibration(const std::string& handeye_yaml_path);
+    /**
+    * @brief 验证手眼标定准确性
+    * @param img 输入图像
+    * @param gimbal_quaternion 云台四元数（用于对比）
+    */
     void validate_handeye(cv::Mat& img, const Eigen::Quaterniond& gimbal_quaternion);
+    /**
+    * @brief 重置验证统计信息
+    */
     void reset_validation_stats(); // 重置验证统计信息
 
     // 保存和加载标定数据
+    /**
+    * @brief 保存相机标定图片
+    * @param img 要保存的图像
+    * @param index 图片索引
+    */
     void save_camera_image(const cv::Mat& img, int index); // 保存相机标定图片
+    /**
+    * @brief 保存手眼标定数据（图片和姿态信息）
+    * @param img 要保存的图像
+    * @param q 云台四元数
+    * @param index 数据索引
+    */
     void save_handeye_data(
         const cv::Mat& img,
         const Eigen::Quaterniond& q,
         int index
     ); // 保存手眼标定数据（图片+姿态）
+    /**
+    * @brief 从文件夹加载手眼标定数据
+    * @param folder_path 数据文件夹路径
+    * @return 是否成功加载
+    */
     bool load_handeye_data_from_folder(const std::string& folder_path); // 从文件夹加载手眼标定数据
 
 private:
+    /**
+    * @brief 保存相机标定结果到 YAML 文件
+    *
+    * @param image_size 图像大小 (cv::Size(width, height))
+    * @param camera_matrix 相机内参矩阵 (3x3)
+    * @param dist_coeffs 畸变系数 (1xN，通常5个或8个)
+    * @param filename 输出的YAML文件路径
+    */
     void saveCalibrationYAML(
         const cv::Size& image_size,
         const cv::Mat& camera_matrix,
         const cv::Mat& dist_coeffs,
         const std::string& filename
     );
+    /**
+    @brief 输出手眼标定数据
+    */
     void print_yaml(
         const cv::Mat& R_camera2gimbal,
         const cv::Mat& t_camera2gimbal,
         const Eigen::Vector3d& rpy
     );
+    /**
+    @brief 输出手眼标定数据
+    */
     void print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d& rpy);
+    /**
+    * @brief 保存手眼标定结果到YAML文件
+    * @param R_camera2gimbal 相机到云台的旋转矩阵
+    * @param t_camera2gimbal 相机到云台的平移向量
+    * @param rpy 相机同理想情况的偏角
+    * @param filename 输出的YAML文件路径
+    */
     void saveHandEyeCalibrationYAML(
         const cv::Mat& R_camera2gimbal,
         const cv::Mat& t_camera2gimbal,
