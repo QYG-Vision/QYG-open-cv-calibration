@@ -14,10 +14,12 @@
 #include <opencv2/opencv.hpp>
 #include <sstream>
 // yaml-cpp
+#include <utility>
 #include <yaml-cpp/yaml.h>
 
 #define IN
 #define OUT
+#define MINI_DISTANCE_PIX 30.0 // 标定板角点最小距离像素px值
 
 namespace qd::calibrate {
 
@@ -58,16 +60,15 @@ class Calibrate {
 public:
     Calibrate(const std::string& config_path);
 
-    bool collect_camera(Mat& img, bool enable_collect = false);
-
     /**
-    @brief 获取标定板角点
-    */
-    bool collect_camera(
-        IN Mat& img,
-        OUT std::vector<Point2f>& pixel_points,
-        OUT vector<Point3f>& object_points
-    );
+     * @brief 收集相机标定数据
+     * 
+     * @param img 原始图像
+     * @param enable_collect 是否收集数据 
+     * @return true 
+     * @return false 
+     */
+    bool collect_camera(Mat& img, bool enable_collect = false);
 
     /**
     @brief 收集手眼标定数据
@@ -85,19 +86,10 @@ public:
     void calibrate_handeye();
 
     /**
-    @brief 输入 2D 标定角点获得标定板坐标系点位
-    */
-    vector<Point3f> calcChessboardCorners(std::vector<cv::Point2f>& pixel_points);
-
-    /**
-    @brief 查找 2D 标定角点
-    */  
-    bool find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pixel_points);
-
-    /**
     @brief 可视化输入的云台欧拉角
     */
     bool display_rpy(cv::Mat& img, const Eigen::Quaterniond& q);
+
     /**
     * @brief 显示重投影误差
     * @param img 输入图像
@@ -110,17 +102,6 @@ public:
     * @param img 
     */
     void show_collected_corners(cv::Mat& img);
-
-    /**
-        @brief 计算重投影误差
-        @param object_points 3D 物体点
-        @param pixel_points 2D 像素点
-        @return 重投影误差
-    */
-    double calculate_reprojection_error(
-        const std::vector<cv::Point2f>& pixel_points,
-        const std::vector<cv::Point2f>& projected_points
-    );
 
     // 手眼标定验证相关方法
     /**
@@ -140,6 +121,45 @@ public:
     */
     void reset_validation_stats(); // 重置验证统计信息
 
+
+    /**
+    * @brief 从文件夹加载手眼标定数据
+    * @param folder_path 数据文件夹路径
+    * @return 是否成功加载
+    */
+    bool load_handeye_data_from_folder(const std::string& folder_path); // 从文件夹加载手眼标定数据
+
+private:
+    /**
+    @brief 获取标定板角点
+    */
+    bool collect_camera(
+        IN Mat& img,
+        OUT std::vector<Point2f>& pixel_points,
+        OUT vector<Point3f>& object_points
+    );
+
+    /**
+    @brief 输入 2D 标定角点获得标定板坐标系点位
+    */
+    vector<Point3f> calcChessboardCorners(std::vector<cv::Point2f>& pixel_points);
+
+    /**
+    @brief 查找 2D 标定角点
+    */  
+    bool find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pixel_points);
+
+    /**
+        @brief 计算重投影误差
+        @param object_points 3D 物体点
+        @param pixel_points 2D 像素点
+        @return 重投影误差
+    */
+    double calculate_reprojection_error(
+        const std::vector<cv::Point2f>& pixel_points,
+        const std::vector<cv::Point2f>& projected_points
+    );
+
     // 保存和加载标定数据
     /**
     * @brief 保存相机标定图片
@@ -158,14 +178,7 @@ public:
         const Eigen::Quaterniond& q,
         int index
     ); // 保存手眼标定数据（图片+姿态）
-    /**
-    * @brief 从文件夹加载手眼标定数据
-    * @param folder_path 数据文件夹路径
-    * @return 是否成功加载
-    */
-    bool load_handeye_data_from_folder(const std::string& folder_path); // 从文件夹加载手眼标定数据
 
-private:
     /**
     * @brief 保存相机标定结果到 YAML 文件
     *
@@ -205,6 +218,14 @@ private:
         const Eigen::Vector3d& rpy,
         const std::string& filename
     );
+
+    /**
+     * @brief 计算标定板角点的最小距离
+     * 
+     * @param pixel_points 标定板角点
+     * @return std::pair<bool, double> bool：是否满足最小距离要求，double：最小距离像素px值
+     */
+    std::pair<bool, double> calculate_coners_min_distance(IN std::vector<Point2f>& pixel_points);
 
 public:
     Paramer paramer;

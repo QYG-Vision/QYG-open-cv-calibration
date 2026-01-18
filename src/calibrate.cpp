@@ -355,6 +355,8 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
     }
 
     // 可视化
+    auto result=calculate_coners_min_distance(pixel_points);
+    found = result.first;
     // 在图像上绘制并显示角点
     drawChessboardCorners(img, this->paramer.boardSize, Mat(pixel_points), found);
     // 在图像上显示已采集的数量
@@ -413,18 +415,20 @@ void Calibrate::calibrate_handeye() {
     t_camera2gimbal /= 1e3; // mm to m
 
     // 计算相机同理想情况的偏角
-    Eigen::Matrix3d R_camera2gimbal_eigen;
-    cv::cv2eigen(R_camera2gimbal, R_camera2gimbal_eigen);
+    Eigen::Matrix3d R_cameraRDU2gimbalFLU_eigen;
+    cv::cv2eigen(R_camera2gimbal, R_cameraRDU2gimbalFLU_eigen);
     Eigen::Matrix3d R_gimbal2ideal { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } }; // 轴变化矩阵
 
     // 输出yaml
     Eigen::Matrix3d R_cameraFLU2gimbalFLU =
-        R_camera2gimbal_eigen * R_gimbal2ideal; // 变更camera坐标系为FLU
-    Eigen::Matrix3d R_gimbalFLU2cameraFLU = R_cameraFLU2gimbalFLU.transpose();
+        R_cameraRDU2gimbalFLU_eigen * R_gimbal2ideal; // 变更camera坐标系为FLU
+    // Eigen::Matrix3d R_gimbalFLU2cameraFLU = R_cameraFLU2gimbalFLU.transpose();
     Eigen::Vector3d rpy =
-        eulers(Eigen::Quaterniond { R_gimbalFLU2cameraFLU }, 2, 1, 0) * 180 / M_PI; // degree
+        eulers(Eigen::Quaterniond { R_cameraFLU2gimbalFLU }, 2, 1, 0) * 180 / M_PI; // degree
     // 输出标定信息
     print_yaml(t_camera2gimbal, rpy);
+    rpy = eulers(Eigen::Quaterniond { R_cameraRDU2gimbalFLU_eigen.transpose() }, 2, 1, 0) * 180 / M_PI;
+
 
     // 保存手眼标定结果到文件
     saveHandEyeCalibrationYAML(R_camera2gimbal, t_camera2gimbal, rpy, "handeye_calibration.yaml");
@@ -1160,6 +1164,53 @@ void Calibrate::show_collected_corners(cv::Mat &img){
     for(auto & corners : this->img_points){
         cv::drawChessboardCorners(img, this->paramer.boardSize, Mat(corners), true);
     }
+}
+
+std::pair<bool, double> Calibrate::calculate_coners_min_distance(IN std::vector<Point2f>& pixel_points){
+double min_dist = std::numeric_limits<double>::max(); // 初始化为最大值
+    double max_dist = 0.0; // 如果需要最大值也可以顺便算一下
+    
+    int width = paramer.boardSize.width;
+    int height = paramer.boardSize.height;
+
+    // 遍历所有角点
+    for (int row = 0; row < height; ++row) {
+        for (int col = 0; col < width; ++col) {
+            
+            // 当前角点的索引
+            int idx = row * width + col;
+            cv::Point2f pt_curr = pixel_points[idx];
+
+            // 1. 计算与“右侧”相邻点的距离 (如果不是最后一列)
+            if (col < width - 1) {
+                int idx_right = idx + 1;
+                cv::Point2f pt_right = pixel_points[idx_right];
+                double dist = cv::norm(pt_curr - pt_right); // 计算欧氏距离
+                
+                if (dist < min_dist) min_dist = dist;
+                if (dist > max_dist) max_dist = dist;
+            }
+
+            // 2. 计算与“下方”相邻点的距离 (如果不是最后一行)
+            if (row < height - 1) {
+                int idx_bottom = idx + width;
+                cv::Point2f pt_bottom = pixel_points[idx_bottom];
+                double dist = cv::norm(pt_curr - pt_bottom); // 计算欧氏距离
+                
+                if (dist < min_dist) min_dist = dist;
+                if (dist > max_dist) max_dist = dist;
+            }
+        }
+    }
+
+    std::cout << "最小相邻像素距离: " << min_dist << std::endl;
+    
+    bool is_too_dense = false;
+    if (min_dist < MINI_DISTANCE_PIX) {
+        std::cout << "警告: 角点过于密集，可能导致检测精度下降。" << std::endl;
+    }   
+
+    return {is_too_dense, min_dist};
 }
 
 } // namespace qd::calibrate
