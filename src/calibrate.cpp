@@ -75,7 +75,6 @@ bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
     return true;
 }
 
-
 bool Calibrate::collect_camera(
     IN Mat& img,
     OUT std::vector<Point2f>& pixel_points,
@@ -97,7 +96,6 @@ bool Calibrate::collect_camera(
 
     return false;
 }
-
 
 bool Calibrate::calibrate_camera() {
     if (obj_points.size() < 1) {
@@ -183,7 +181,10 @@ vector<Point3f> Calibrate::calcChessboardCorners(std::vector<cv::Point2f>& pixel
         case ASYMMETRIC_CIRCLES_GRID:
             for (int i = 0; i < boardSize.height; i++)
                 for (int j = 0; j < boardSize.width; j++)
-                    corners.emplace_back(float((2 * j + i % 2) * squareSize), float(i * squareSize), 0
+                    corners.emplace_back(
+                        float((2 * j + i % 2) * squareSize),
+                        float(i * squareSize),
+                        0
                     );
             break;
 
@@ -192,7 +193,6 @@ vector<Point3f> Calibrate::calcChessboardCorners(std::vector<cv::Point2f>& pixel
     }
     return corners;
 }
-
 
 bool Calibrate::find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pixel_points) {
     Mat img_gray;
@@ -224,7 +224,6 @@ bool Calibrate::find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pi
     }
     return found;
 }
-
 
 void Calibrate::saveCalibrationYAML(
     const cv::Size& image_size,
@@ -301,7 +300,6 @@ void Calibrate::saveCalibrationYAML(
     std::cout << "标定结果已保存到 " << filename << std::endl;
 }
 
-
 void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool enable_collect) {
     // 获得标定点
     std::vector<Point2f> pixel_points;
@@ -350,12 +348,10 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
         std::cout << "camera tvec: " << tvec.t() << std::endl;
         Eigen::Vector3d tvec_vec(tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
         std::cout << "norm: " << tvec_vec.norm() << std::endl;
-        std::cout << "角点间距: " << cv::norm(pixel_points[0] - pixel_points[1]) << " px"
-                  << std::endl;
     }
 
     // 可视化
-    auto result=calculate_coners_min_distance(pixel_points);
+    auto result = calculate_coners_min_distance(pixel_points);
     found = result.first;
     // 在图像上绘制并显示角点
     drawChessboardCorners(img, this->paramer.boardSize, Mat(pixel_points), found);
@@ -393,7 +389,6 @@ bool Calibrate::display_rpy(cv::Mat& img, const Eigen::Quaterniond& q) {
     return true;
 }
 
-
 void Calibrate::calibrate_handeye() {
     // 手眼标定
     std::cout << "Start calibrate_handeye !!! " << std::endl;
@@ -427,13 +422,12 @@ void Calibrate::calibrate_handeye() {
         eulers(Eigen::Quaterniond { R_cameraFLU2gimbalFLU }, 2, 1, 0) * 180 / M_PI; // degree
     // 输出标定信息
     print_yaml(t_camera2gimbal, rpy);
-    rpy = eulers(Eigen::Quaterniond { R_cameraRDU2gimbalFLU_eigen.transpose() }, 2, 1, 0) * 180 / M_PI;
-
+    rpy = eulers(Eigen::Quaterniond { R_cameraRDU2gimbalFLU_eigen.transpose() }, 2, 1, 0) * 180
+        / M_PI;
 
     // 保存手眼标定结果到文件
     saveHandEyeCalibrationYAML(R_camera2gimbal, t_camera2gimbal, rpy, "handeye_calibration.yaml");
 }
-
 
 void Calibrate::print_yaml(
     const cv::Mat& R_camera2gimbal,
@@ -470,7 +464,6 @@ void Calibrate::print_yaml(
 
     fmt::print("\n{}\n", result.c_str());
 }
-
 
 void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d& rpy) {
     // 1. 格式化 xyz 字符串: "x y z"
@@ -580,7 +573,6 @@ void Calibrate::display_error(cv::Mat& img) {
     }
 }
 
-
 void Calibrate::saveHandEyeCalibrationYAML(
     const cv::Mat& R_camera2gimbal,
     const cv::Mat& t_camera2gimbal,
@@ -614,7 +606,6 @@ void Calibrate::saveHandEyeCalibrationYAML(
 
     std::cout << "手眼标定结果已保存到 " << filename << std::endl;
 }
-
 
 bool Calibrate::load_handeye_calibration(const std::string& handeye_yaml_path) {
     try {
@@ -946,7 +937,6 @@ void Calibrate::reset_validation_stats() {
     world_positions_history.clear();
 }
 
-
 double Calibrate::calculate_reprojection_error(
     const std::vector<cv::Point2f>& pixel_points,
     const std::vector<cv::Point2f>& projected_points
@@ -964,7 +954,6 @@ void Calibrate::save_camera_image(const cv::Mat& img, int index) {
     cv::imwrite(filename, img);
     std::cout << "已保存相机标定图片: " << filename << std::endl;
 }
-
 
 void Calibrate::save_handeye_data(const cv::Mat& img, const Eigen::Quaterniond& q, int index) {
     // 保存图片
@@ -1014,7 +1003,6 @@ void Calibrate::save_handeye_data(const cv::Mat& img, const Eigen::Quaterniond& 
 
     std::cout << "已保存手眼标定数据: " << img_filename << ", " << pose_filename << std::endl;
 }
-
 
 bool Calibrate::load_handeye_data_from_folder(const std::string& folder_path) {
     // 清空现有数据
@@ -1160,23 +1148,23 @@ bool Calibrate::load_handeye_data_from_folder(const std::string& folder_path) {
     return true;
 }
 
-void Calibrate::show_collected_corners(cv::Mat &img){
-    for(auto & corners : this->img_points){
+void Calibrate::show_collected_corners(cv::Mat& img) {
+    for (auto& corners: this->img_points) {
         cv::drawChessboardCorners(img, this->paramer.boardSize, Mat(corners), true);
     }
 }
 
-std::pair<bool, double> Calibrate::calculate_coners_min_distance(IN std::vector<Point2f>& pixel_points){
-double min_dist = std::numeric_limits<double>::max(); // 初始化为最大值
+std::pair<bool, double>
+Calibrate::calculate_coners_min_distance(IN std::vector<Point2f>& pixel_points) {
+    double min_dist = std::numeric_limits<double>::max(); // 初始化为最大值
     double max_dist = 0.0; // 如果需要最大值也可以顺便算一下
-    
+
     int width = paramer.boardSize.width;
     int height = paramer.boardSize.height;
 
     // 遍历所有角点
     for (int row = 0; row < height; ++row) {
         for (int col = 0; col < width; ++col) {
-            
             // 当前角点的索引
             int idx = row * width + col;
             cv::Point2f pt_curr = pixel_points[idx];
@@ -1186,9 +1174,11 @@ double min_dist = std::numeric_limits<double>::max(); // 初始化为最大值
                 int idx_right = idx + 1;
                 cv::Point2f pt_right = pixel_points[idx_right];
                 double dist = cv::norm(pt_curr - pt_right); // 计算欧氏距离
-                
-                if (dist < min_dist) min_dist = dist;
-                if (dist > max_dist) max_dist = dist;
+
+                if (dist < min_dist)
+                    min_dist = dist;
+                if (dist > max_dist)
+                    max_dist = dist;
             }
 
             // 2. 计算与“下方”相邻点的距离 (如果不是最后一行)
@@ -1196,21 +1186,22 @@ double min_dist = std::numeric_limits<double>::max(); // 初始化为最大值
                 int idx_bottom = idx + width;
                 cv::Point2f pt_bottom = pixel_points[idx_bottom];
                 double dist = cv::norm(pt_curr - pt_bottom); // 计算欧氏距离
-                
-                if (dist < min_dist) min_dist = dist;
-                if (dist > max_dist) max_dist = dist;
+
+                if (dist < min_dist)
+                    min_dist = dist;
+                if (dist > max_dist)
+                    max_dist = dist;
             }
         }
     }
 
-    std::cout << "最小相邻像素距离: " << min_dist << std::endl;
-    
-    bool is_too_dense = false;
+    bool found = true;
     if (min_dist < MINI_DISTANCE_PIX) {
+        found = false;
         std::cout << "警告: 角点过于密集，可能导致检测精度下降。" << std::endl;
-    }   
+    }
 
-    return {is_too_dense, min_dist};
+    return { found, min_dist };
 }
 
 } // namespace qd::calibrate

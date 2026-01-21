@@ -19,7 +19,7 @@
 
 #define IN
 #define OUT
-#define MINI_DISTANCE_PIX 30.0 // 标定板角点最小距离像素px值
+#define MINI_DISTANCE_PIX 23.0 // 标定板角点最小距离像素px值
 
 namespace qd::calibrate {
 
