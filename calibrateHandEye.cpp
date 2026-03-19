@@ -101,17 +101,13 @@ int main(int argc, char* argv[]) {
             device.reset();
             break;
         } // 标定
-        else if (key == 's')
-        {
-            calibrate_.collect_handeye(img, q, true);
-
-        } // 采集
         else if (key == 27)
         {
             break;
         }
 
-        calibrate_.collect_handeye(img, q);
+        bool enable_collect = (key == 's');
+        calibrate_.collect_handeye(img, q, enable_collect);
         calibrate_.show_collected_corners(img);
         calibrate_.display_rpy(img, q); // 可视化角度
 

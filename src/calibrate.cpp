@@ -402,7 +402,7 @@ void Calibrate::calibrate_handeye() {
         this->tvecs,
         R_camera2gimbal,
         t_camera2gimbal,
-        CALIB_HAND_EYE_PARK
+        cv::CALIB_HAND_EYE_TSAI
     );
     tm.stop();
     std::cout << "calibrateHandeye Latency:" << tm.getTimeSec() << " s" << std::endl;
