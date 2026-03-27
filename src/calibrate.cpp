@@ -11,6 +11,55 @@
 
 namespace qd::calibrate {
 
+namespace {
+
+void draw_board_orientation(
+    cv::Mat& img, const std::vector<cv::Point2f>& pixel_points, const cv::Size& board_size
+) {
+    if (pixel_points.size() < 2) {
+        return;
+    }
+
+    const int board_point_count = board_size.width * board_size.height;
+    if (board_size.width < 2 || board_size.height < 2
+        || static_cast<int>(pixel_points.size()) < board_point_count)
+    {
+        return;
+    }
+
+    const cv::Point origin = pixel_points.front();
+    const cv::Point x_axis = pixel_points[1];
+    const cv::Point y_axis = pixel_points[board_size.width];
+    const cv::Point opposite = pixel_points[board_point_count - 1];
+
+    cv::circle(img, origin, 8, cv::Scalar(255, 255, 255), -1);
+    cv::circle(img, origin, 8, cv::Scalar(0, 0, 255), 2);
+    cv::arrowedLine(img, origin, x_axis, cv::Scalar(0, 0, 255), 3, cv::LINE_AA, 0, 0.2);
+    cv::arrowedLine(img, origin, y_axis, cv::Scalar(0, 255, 0), 3, cv::LINE_AA, 0, 0.2);
+    cv::circle(img, opposite, 6, cv::Scalar(255, 255, 0), 2);
+
+    cv::putText(
+        img, "O", origin + cv::Point(10, -10), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2
+    );
+    cv::putText(
+        img, "X+", x_axis + cv::Point(10, -10), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 0, 255), 2
+    );
+    cv::putText(
+        img, "Y+", y_axis + cv::Point(10, -10), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2
+    );
+    cv::putText(
+        img,
+        "Board Dir",
+        origin + cv::Point(10, 25),
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.7,
+        cv::Scalar(255, 255, 0),
+        2
+    );
+}
+
+} // namespace
+
 Calibrate::Calibrate(const std::string& config_path): paramer(config_path) {
     auto yaml = YAML::LoadFile(config_path);
 
@@ -406,6 +455,7 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
     // 在图像上显示已采集的数量
     std::string text = "Collected: " + std::to_string(this->collected_count);
     putText(img, text, Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
+    draw_board_orientation(img, pixel_points, this->paramer.boardSize);
 }
 
 bool Calibrate::display_rpy(cv::Mat& img, const Eigen::Quaterniond& q) {
