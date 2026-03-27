@@ -64,13 +64,11 @@ int main(int argc, char* argv[]) {
             } else {
                 std::cout << "请继续采集有效的标定图像后再次按 'c'。" << std::endl;
             }
-        } else if (key == 's') {
-            calibrate_.collect_camera(img, true);
         } else if (key == 27) {
             break;
         }
 
-        calibrate_.collect_camera(img);
+        calibrate_.collect_camera(img, key == 's' ? true : false);
 
         imshow("相机标定", img);
     }
