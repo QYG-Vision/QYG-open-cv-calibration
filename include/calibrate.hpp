@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <set>
 // opencv
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/opencv.hpp>
@@ -145,6 +146,17 @@ public:
     */
     bool load_handeye_data_from_folder(const std::string& folder_path); // 从文件夹加载手眼标定数据
 
+    /**
+     * @brief 切换自动采集模式（类似 ROS camera_calibration）
+     * @param enable 是否启用
+     */
+    void set_auto_collect(bool enable);
+
+    /**
+     * @brief 查询当前自动采集状态
+     */
+    bool is_auto_collect_enabled() const { return auto_collect_enabled_; }
+
 private:
     /**
     @brief 获取标定板角点
@@ -154,6 +166,42 @@ private:
         OUT std::vector<Point2f>& pixel_points,
         OUT vector<Point3f>& object_points
     );
+
+    // ---- 自动采集相关 ----
+
+    /**
+     * @brief 标定板在图像中的位置/姿态特征参数（均归一化到 [0, 1]）
+     */
+    struct BoardParams {
+        double x;         ///< 标定板中心 X 归一化坐标
+        double y;         ///< 标定板中心 Y 归一化坐标
+        double size;      ///< 标定板对角线 / 图像对角线
+        double skew;      ///< 顶边与水平方向夹角归一化（0=水平, 1=90°）
+        double sharpness; ///< 标定板区域拉普拉斯方差（越大越清晰）
+    };
+
+    /**
+     * @brief 从检测到的角点和原始图像计算 BoardParams（含清晰度）
+     */
+    BoardParams compute_board_params(
+        const cv::Mat& img, const std::vector<cv::Point2f>& corners
+    );
+
+    /**
+     * @brief 判断当前帧是否满足自动采集条件（新区域 + 时间间隔）
+     */
+    bool should_auto_collect(const BoardParams& params);
+
+    /**
+     * @brief 更新覆盖度统计并重置计时
+     */
+    void update_auto_collect_coverage(const BoardParams& params);
+
+    /**
+     * @brief 在图像上绘制各维度覆盖进度条
+     * @param current_params 当前帧的参数（nullptr 表示未检测到标定板）
+     */
+    void draw_progress_bars(cv::Mat& img, const BoardParams* current_params);
 
     /**
     @brief 输入 2D 标定角点获得标定板坐标系点位
@@ -274,6 +322,22 @@ private:
     // 数据保存路径
     std::string camera_calib_save_path; // 相机标定图片保存路径
     std::string handeye_calib_save_path; // 手眼标定数据保存路径
+
+    // ---- 自动采集成员 ----
+    bool   auto_collect_enabled_             = false;
+    int    auto_collect_interval_ms_         = 500;
+    int    auto_collect_x_bins_              = 7;
+    int    auto_collect_y_bins_              = 7;
+    int    auto_collect_size_bins_           = 7;
+    int    auto_collect_skew_bins_           = 7;
+    double auto_collect_sharpness_threshold_ = 80.0; ///< 拉普拉斯方差最低阈值
+
+    std::set<int> x_bins_covered_;
+    std::set<int> y_bins_covered_;
+    std::set<int> size_bins_covered_;
+    std::set<int> skew_bins_covered_;
+
+    std::chrono::steady_clock::time_point last_auto_collect_time_;
 };
 
 /**

@@ -40,14 +40,16 @@ int main(int argc, char* argv[]) {
     namedWindow("相机标定");
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
-    std::cout << "开始标定，按 'c' 键开始计算标定参数，按 's' 键采集标定数据，按 'ESC' 键退出"
-              << std::endl;
+    std::cout << "开始标定，操作说明：\n"
+              << "  's' - 手动采集当前帧\n"
+              << "  'a' - 切换自动采集模式（类似 ROS camera_calibration）\n"
+              << "  'c' - 开始计算标定参数\n"
+              << "  'ESC' - 退出" << std::endl;
+
     while (true) {
-        // 获取图像和串口数据
         Mat img;
         device->read(img, timestamp);
 
-        // 检查图像
         if (img.empty()) {
             cout << "image is empty" << endl;
             if (calibrate_.calibrate_camera()) {
@@ -64,11 +66,13 @@ int main(int argc, char* argv[]) {
             } else {
                 std::cout << "请继续采集有效的标定图像后再次按 'c'。" << std::endl;
             }
+        } else if (key == 'a') {
+            calibrate_.set_auto_collect(!calibrate_.is_auto_collect_enabled());
         } else if (key == 27) {
             break;
         }
 
-        calibrate_.collect_camera(img, key == 's' ? true : false);
+        calibrate_.collect_camera(img, key == 's');
 
         imshow("相机标定", img);
     }

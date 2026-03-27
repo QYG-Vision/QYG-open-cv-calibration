@@ -12,3 +12,5 @@ _deps
 build/
 .cache/
 MvSdkLog/
+camera_calib_images/
+camera_calibration.yaml

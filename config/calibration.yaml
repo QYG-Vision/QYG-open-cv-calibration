@@ -10,8 +10,8 @@ square_size: 35  # 标定板方格边长，单位：毫米
 HIK:
   enable_frame_rate: false  # 是否锁帧
   frame_rate: 200           # 锁帧时的帧率
-  exposure_time: 10000       # 曝光时间，单位：微秒
-  gain: 10.0                # 增益
+  exposure_time: 50000       # 曝光时间，单位：微秒
+  gain: 0.0                # 增益，识别标定版为 0,不然会增加噪点
   adc_bit_depth: ADCBitDepth_8  # ADC位深，8或10
   pixel_format: BayerRG8    
 UVC:
@@ -25,8 +25,8 @@ IMG:
   images_path: /home/qidian/images # 图像路径
 
 # 手眼标定和重投影误差用到的相机参数
-camera_matrix: [2369.517706316392, 0, 734.8156447660090, 0, 2369.213940616253,560.3350034770036, 0, 0, 1]
-distort_coeffs: [-0.023281262112283, 0.091482806312295, -0.00, 0.0000, 0.00000]
+camera_matrix: [2374.800283232456, 0, 735.06179430972065, 0, 2375.6076189500459, 574.06058339146648, 0, 0, 1]
+distort_coeffs: [-0.03677891526705588, 0.1492051837742159, 0.001561300839571889, 0.001470933366848674, 0]
 
 
 # 串口参数
@@ -37,3 +37,13 @@ Serial:
 # 标定数据保存路径
 camera_calib_save_path: ./camera_calib_images  # 相机标定图片保存路径
 handeye_calib_save_path: ./handeye_calib_data   # 手眼标定数据保存路径（包含图片和姿态信息）
+
+# 自动采集配置（类似 ROS camera_calibration）
+# 按 'a' 键在运行时切换，或在此直接设为 true 启动即启用
+auto_collect_enabled: true      # 是否默认启用自动采集
+auto_collect_interval_ms: 50    # 两次自动采集的最小间隔（毫秒）
+auto_collect_x_bins: 20           # 图像 X 方向位置分块数
+auto_collect_y_bins: 20          # 图像 Y 方向位置分块数
+auto_collect_size_bins: 20        # 标定板大小分块数
+auto_collect_skew_bins: 20        # 标定板倾斜角分块数
+auto_collect_sharpness_threshold: 40.0  # 清晰度阈值（拉普拉斯方差），低于此值判定为拖影/模糊，拒绝采集

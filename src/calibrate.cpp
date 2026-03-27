@@ -41,35 +41,83 @@ Calibrate::Calibrate(const std::string& config_path): paramer(config_path) {
     // 创建保存目录
     std::filesystem::create_directories(camera_calib_save_path);
     std::filesystem::create_directories(handeye_calib_save_path);
+
+    // 自动采集配置
+    auto_collect_enabled_ = yaml["auto_collect_enabled"]
+        ? yaml["auto_collect_enabled"].as<bool>() : false;
+    auto_collect_interval_ms_ = yaml["auto_collect_interval_ms"]
+        ? yaml["auto_collect_interval_ms"].as<int>() : 500;
+    auto_collect_x_bins_    = yaml["auto_collect_x_bins"]
+        ? yaml["auto_collect_x_bins"].as<int>() : 7;
+    auto_collect_y_bins_    = yaml["auto_collect_y_bins"]
+        ? yaml["auto_collect_y_bins"].as<int>() : 7;
+    auto_collect_size_bins_ = yaml["auto_collect_size_bins"]
+        ? yaml["auto_collect_size_bins"].as<int>() : 7;
+    auto_collect_skew_bins_ = yaml["auto_collect_skew_bins"]
+        ? yaml["auto_collect_skew_bins"].as<int>() : 7;
+    auto_collect_sharpness_threshold_ = yaml["auto_collect_sharpness_threshold"]
+        ? yaml["auto_collect_sharpness_threshold"].as<double>() : 80.0;
+
+    // 允许启动后立即采集第一帧
+    last_auto_collect_time_ =
+        std::chrono::steady_clock::now() - std::chrono::seconds(10);
 }
 
 bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
     img_size = img.size();
 
-    // 查找标定点 pixel_points
     std::vector<Point2f> pixel_points;
     bool found = find_Chessboard(img, pixel_points);
 
     vector<Point3f> object_points;
     if (found) {
-        // 获得 pixel_points 对应的 object_points
         object_points = calcChessboardCorners(pixel_points);
         object_points[paramer.boardSize.width - 1].x =
-            object_points[0].x + paramer.grid_width; // 右上角点修正
+            object_points[0].x + paramer.grid_width;
+
+        BoardParams params = compute_board_params(img, pixel_points);
+        bool sharp_enough  = params.sharpness >= auto_collect_sharpness_threshold_;
+
+        if (auto_collect_enabled_) {
+            if (!enable_collect && sharp_enough && should_auto_collect(params)) {
+                enable_collect = true;
+            }
+            if (enable_collect && sharp_enough) {
+                update_auto_collect_coverage(params);
+            } else if (enable_collect && !sharp_enough) {
+                // 手动按 's' 但图像模糊，阻止采集
+                enable_collect = false;
+            }
+            draw_progress_bars(img, &params);
+        } else if (!sharp_enough && enable_collect) {
+            // 非自动模式下手动采集也拦截模糊帧
+            enable_collect = false;
+            std::cout << "[警告] 图像过于模糊（sharpness="
+                      << std::fixed << std::setprecision(1) << params.sharpness
+                      << " < " << auto_collect_sharpness_threshold_
+                      << "），跳过采集（高曝光拖影？）" << std::endl;
+        }
+
+        // 在标定板区域显示清晰度
+        cv::Scalar sharp_color = sharp_enough ? cv::Scalar(0, 255, 0) : cv::Scalar(0, 60, 255);
+        cv::putText(img,
+                    fmt::format("Sharp: {:.0f}", params.sharpness),
+                    Point(10, 65), FONT_HERSHEY_SIMPLEX, 0.8, sharp_color, 2);
 
         if (enable_collect) {
             this->obj_points.push_back(object_points);
             this->img_points.push_back(pixel_points);
             this->collected_count++;
-            // 保存图片
             save_camera_image(img, this->collected_count);
         }
+    } else if (auto_collect_enabled_) {
+        draw_progress_bars(img, nullptr);
     }
 
-    // 在图像上绘制并显示角点
     drawChessboardCorners(img, this->paramer.boardSize, Mat(pixel_points), found);
-    // 在图像上显示已采集的数量
+
     std::string text = "Collected: " + std::to_string(this->collected_count);
+    if (auto_collect_enabled_) text += "  [AUTO]";
     putText(img, text, Point(10, 30), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
 
     return true;
@@ -1151,6 +1199,194 @@ bool Calibrate::load_handeye_data_from_folder(const std::string& folder_path) {
 void Calibrate::show_collected_corners(cv::Mat& img) {
     for (auto& corners: this->img_points) {
         cv::drawChessboardCorners(img, this->paramer.boardSize, Mat(corners), true);
+    }
+}
+
+// ============================================================
+// 自动采集功能实现
+// ============================================================
+
+void Calibrate::set_auto_collect(bool enable) {
+    if (enable && !auto_collect_enabled_) {
+        // 重新启用时允许立刻采集一帧，但保留已有覆盖度记录
+        last_auto_collect_time_ =
+            std::chrono::steady_clock::now() - std::chrono::seconds(10);
+    }
+    auto_collect_enabled_ = enable;
+    std::cout << (enable ? "[AutoCollect] 自动采集已启用" : "[AutoCollect] 自动采集已关闭")
+              << std::endl;
+}
+
+Calibrate::BoardParams
+Calibrate::compute_board_params(
+    const cv::Mat& img, const std::vector<cv::Point2f>& corners
+) {
+    int cols = paramer.boardSize.width;
+    int rows = paramer.boardSize.height;
+
+    // 标定板中心（归一化坐标）
+    cv::Point2f center(0.f, 0.f);
+    for (const auto& c : corners) center += c;
+    center *= 1.f / static_cast<float>(corners.size());
+    double x = center.x / img_size.width;
+    double y = center.y / img_size.height;
+
+    // 大小：标定板对角线 / 图像对角线
+    cv::Point2f tl = corners[0];
+    cv::Point2f tr = corners[cols - 1];
+    cv::Point2f br = corners[rows * cols - 1];
+    double board_diag = cv::norm(tl - br);
+    double img_diag   = std::hypot(img_size.width, img_size.height);
+    double size = board_diag / img_diag;
+
+    // 倾斜：顶边方向与水平方向夹角，归一化到 [0, 1]（90° → 1）
+    cv::Point2f top  = tr - tl;
+    double angle = std::atan2(std::abs(top.y), std::abs(top.x)); // [0, π/2]
+    double skew  = angle / (CV_PI / 2.0);
+
+    // 清晰度：在标定板角点包围框区域内计算拉普拉斯方差
+    // 方差越大说明高频细节越丰富，图像越清晰；拖影/运动模糊会使方差显著降低
+    cv::Rect board_roi = cv::boundingRect(corners);
+    int pad = static_cast<int>(std::max(board_roi.width, board_roi.height) * 0.05);
+    board_roi.x      = std::max(0, board_roi.x - pad);
+    board_roi.y      = std::max(0, board_roi.y - pad);
+    board_roi.width  = std::min(img.cols - board_roi.x, board_roi.width  + 2 * pad);
+    board_roi.height = std::min(img.rows - board_roi.y, board_roi.height + 2 * pad);
+
+    cv::Mat gray_roi, lap;
+    cv::cvtColor(img(board_roi), gray_roi, cv::COLOR_BGR2GRAY);
+    cv::Laplacian(gray_roi, lap, CV_64F);
+    cv::Scalar mean, stddev;
+    cv::meanStdDev(lap, mean, stddev);
+    double sharpness = stddev[0] * stddev[0]; // 拉普拉斯方差
+
+    return { x, y, size, skew, sharpness };
+}
+
+bool Calibrate::should_auto_collect(const BoardParams& params) {
+    // 清晰度不足（高曝光拖影）直接拒绝
+    if (params.sharpness < auto_collect_sharpness_threshold_) return false;
+
+    auto now     = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       now - last_auto_collect_time_)
+                       .count();
+    if (elapsed < auto_collect_interval_ms_) return false;
+
+    auto to_bin = [](double v, int n) {
+        return std::clamp(static_cast<int>(v * n), 0, n - 1);
+    };
+    int xb = to_bin(params.x,    auto_collect_x_bins_);
+    int yb = to_bin(params.y,    auto_collect_y_bins_);
+    int sb = to_bin(params.size, auto_collect_size_bins_);
+    int kb = to_bin(params.skew, auto_collect_skew_bins_);
+
+    return x_bins_covered_.count(xb) == 0 || y_bins_covered_.count(yb) == 0
+        || size_bins_covered_.count(sb) == 0 || skew_bins_covered_.count(kb) == 0;
+}
+
+void Calibrate::update_auto_collect_coverage(const BoardParams& params) {
+    auto to_bin = [](double v, int n) {
+        return std::clamp(static_cast<int>(v * n), 0, n - 1);
+    };
+    x_bins_covered_.insert(to_bin(params.x,    auto_collect_x_bins_));
+    y_bins_covered_.insert(to_bin(params.y,    auto_collect_y_bins_));
+    size_bins_covered_.insert(to_bin(params.size, auto_collect_size_bins_));
+    skew_bins_covered_.insert(to_bin(params.skew, auto_collect_skew_bins_));
+    last_auto_collect_time_ = std::chrono::steady_clock::now();
+}
+
+void Calibrate::draw_progress_bars(cv::Mat& img, const BoardParams* cur) {
+    // 布局参数
+    const int bar_w    = 190;
+    const int bar_h    = 17;
+    const int label_w  = 36;
+    const int count_w  = 38;
+    const int gap      = 5;
+    const int mx       = 10; // 左边距
+    const int my       = 10; // 下边距
+
+    const int n_bars     = 4;
+    const int title_h    = 20;
+    const int total_h    = title_h + n_bars * (bar_h + gap);
+    const int total_w    = label_w + bar_w + count_w + 6;
+    const int start_x    = mx;
+    const int start_y    = img.rows - my - total_h;
+
+    // 半透明背景
+    cv::Mat roi = img(cv::Rect(start_x - 6, start_y - 6,
+                               total_w + 12, total_h + 12));
+    cv::Mat dark(roi.size(), roi.type(), cv::Scalar(20, 20, 20));
+    cv::addWeighted(roi, 0.35, dark, 0.65, 0, roi);
+    cv::rectangle(img,
+                  { start_x - 6, start_y - 6 },
+                  { start_x + total_w + 6, start_y + total_h + 6 },
+                  { 120, 120, 120 }, 1);
+
+    // 标题 + 清晰度
+    std::string title = "Auto Collect";
+    if (cur) {
+        bool ok = cur->sharpness >= auto_collect_sharpness_threshold_;
+        title += fmt::format("  Shp:{:.0f}", cur->sharpness);
+        cv::putText(img, title, { start_x, start_y + title_h - 4 },
+                    cv::FONT_HERSHEY_SIMPLEX, 0.52,
+                    ok ? cv::Scalar(0, 255, 255) : cv::Scalar(0, 60, 255), 1);
+    } else {
+        cv::putText(img, title, { start_x, start_y + title_h - 4 },
+                    cv::FONT_HERSHEY_SIMPLEX, 0.52, { 0, 255, 255 }, 1);
+    }
+
+    struct BarEntry {
+        const char*        label;
+        const std::set<int>* covered;
+        int                n_bins;
+        double             val; // 当前值，< 0 表示未检测
+    };
+
+    std::array<BarEntry, 4> bars = { {
+        { "X:",   &x_bins_covered_,    auto_collect_x_bins_,    cur ? cur->x    : -1.0 },
+        { "Y:",   &y_bins_covered_,    auto_collect_y_bins_,    cur ? cur->y    : -1.0 },
+        { "Sz:",  &size_bins_covered_, auto_collect_size_bins_, cur ? cur->size : -1.0 },
+        { "Sk:",  &skew_bins_covered_, auto_collect_skew_bins_, cur ? cur->skew : -1.0 },
+    } };
+
+    for (int i = 0; i < n_bars; ++i) {
+        const auto& b = bars[i];
+        int y  = start_y + title_h + i * (bar_h + gap);
+        int bx = start_x + label_w;
+
+        // 标签
+        cv::putText(img, b.label, { start_x, y + bar_h - 4 },
+                    cv::FONT_HERSHEY_SIMPLEX, 0.44, { 200, 200, 200 }, 1);
+
+        // 条形背景
+        cv::rectangle(img, { bx, y }, { bx + bar_w, y + bar_h },
+                      { 70, 70, 70 }, -1);
+
+        // 已覆盖的 bin（绿色）
+        int bw = bar_w / b.n_bins;
+        for (int bin : *b.covered) {
+            int x1 = bx + bin * bw;
+            int x2 = x1 + bw - 1;
+            cv::rectangle(img, { x1, y + 1 }, { x2, y + bar_h - 1 },
+                          { 0, 180, 0 }, -1);
+        }
+
+        // 当前位置指示线（橙色）
+        if (b.val >= 0.0) {
+            int px = bx + static_cast<int>(
+                std::clamp(b.val, 0.0, 1.0) * bar_w);
+            px = std::clamp(px, bx, bx + bar_w - 1);
+            cv::line(img, { px, y }, { px, y + bar_h },
+                     { 0, 120, 255 }, 2);
+        }
+
+        // 右侧计数
+        cv::putText(img,
+                    std::to_string(b.covered->size()) + "/"
+                        + std::to_string(b.n_bins),
+                    { bx + bar_w + 3, y + bar_h - 4 },
+                    cv::FONT_HERSHEY_SIMPLEX, 0.38, { 200, 200, 200 }, 1);
     }
 }
 
