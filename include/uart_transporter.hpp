@@ -26,6 +26,15 @@
 // 串口数据传输设备，符合通用传输接口。
 class UartTransporter {
 public:
+    /**
+     * @brief 构造串口传输对象
+     * @param device_path 设备路径
+     * @param speed 波特率
+     * @param flow_ctrl 流控方式
+     * @param databits 数据位
+     * @param stopbits 停止位
+     * @param parity 校验位
+     */
     UartTransporter(
         const std::string& device_path = "/dev/ttyUSB0",
         int speed = 115200,
@@ -41,16 +50,55 @@ public:
         stopbits_(stopbits),
         parity_(parity) {}
 
+    /**
+     * @brief 打开串口
+     * @return true 成功
+     * @return false 失败
+     */
     bool open();
+    /**
+     * @brief 关闭串口
+     */
     void close();
+    /**
+     * @brief 串口是否打开
+     * @return true 打开
+     * @return false 关闭
+     */
     bool isOpen();
+    /**
+     * @brief 读取串口数据
+     * @param buffer 输出缓冲区
+     * @param len 读取长度
+     * @return int 实际读取长度
+     */
     int read(void* buffer, size_t len);
+    /**
+     * @brief 写入串口数据
+     * @param buffer 输入缓冲区
+     * @param len 写入长度
+     * @return int 实际写入长度
+     */
     int write(const void* buffer, size_t len);
+    /**
+     * @brief 获取最后错误信息
+     * @return std::string 错误信息
+     */
     std::string errorMessage() {
         return error_message_;
     }
 
 private:
+    /**
+     * @brief 配置串口参数
+     * @param speed 波特率
+     * @param flow_ctrl 流控方式
+     * @param databits 数据位
+     * @param stopbits 停止位
+     * @param parity 校验位
+     * @return true 成功
+     * @return false 失败
+     */
     bool setParam(
         int speed = 115200,
         int flow_ctrl = 0,

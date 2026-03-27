@@ -27,9 +27,22 @@ using namespace cv;
 using namespace std;
 
 // 参数类
+/**
+ * @brief 标定板类型
+ */
 enum Pattern { CHESSBOARD, CIRCLES_GRID, ASYMMETRIC_CIRCLES_GRID };
+/**
+ * @brief 标定流程状态
+ */
 enum Mode { Calibrating, Calibrated, Undistorting };
+/**
+ * @brief 标定参数读取与解析
+ */
 struct Paramer {
+    /**
+     * @brief 从配置文件读取标定板参数
+     * @param config_path YAML 配置文件路径
+     */
     Paramer(const std::string& config_path) {
         auto yaml = YAML::LoadFile(config_path);
 
@@ -56,6 +69,9 @@ struct Paramer {
     float grid_width; // 标定板宽度
 };
 
+/**
+ * @brief 相机标定与手眼标定流程
+ */
 class Calibrate {
 public:
     Calibrate(const std::string& config_path);
@@ -260,6 +276,11 @@ private:
     std::string handeye_calib_save_path; // 手眼标定数据保存路径
 };
 
+/**
+ * @brief 归一化角度到 $(-\pi, \pi]$
+ * @param angle 输入角度（弧度）
+ * @return double 归一化后的角度
+ */
 static double limit_rad(double angle) {
     while (angle > CV_PI)
         angle -= 2 * CV_PI;
@@ -268,6 +289,15 @@ static double limit_rad(double angle) {
     return angle;
 }
 
+/**
+ * @brief 四元数转欧拉角
+ * @param q 四元数
+ * @param axis0 轴序0
+ * @param axis1 轴序1
+ * @param axis2 轴序2
+ * @param extrinsic 是否为外旋
+ * @return Eigen::Vector3d 欧拉角（弧度）
+ */
 static Eigen::Vector3d
 eulers(Eigen::Quaterniond q, int axis0, int axis1, int axis2, bool extrinsic = false) {
     if (!extrinsic)
@@ -337,6 +367,15 @@ eulers(Eigen::Quaterniond q, int axis0, int axis1, int axis2, bool extrinsic = f
     return eulers;
 }
 
+/**
+ * @brief 旋转矩阵转欧拉角
+ * @param R 旋转矩阵
+ * @param axis0 轴序0
+ * @param axis1 轴序1
+ * @param axis2 轴序2
+ * @param extrinsic 是否为外旋
+ * @return Eigen::Vector3d 欧拉角（弧度）
+ */
 static Eigen::Vector3d eulers(Eigen::Matrix3d R, int axis0, int axis1, int axis2, bool extrinsic) {
     Eigen::Quaterniond q(R);
     return eulers(q, axis0, axis1, axis2, extrinsic);
