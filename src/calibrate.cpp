@@ -441,7 +441,7 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
         save_handeye_data(img, q, this->collected_count);
 
         // debug
-        std::cout << "gimbal rpy: " << eulers(q, 2, 1, 0).transpose() * 180 / M_PI << std::endl;
+        std::cout << "gimbal ypr: " << eulers(q, 2, 1, 0).transpose() * 180 / M_PI << std::endl;
         std::cout << "camera tvec: " << tvec.t() << std::endl;
         Eigen::Vector3d tvec_vec(tvec.at<double>(0), tvec.at<double>(1), tvec.at<double>(2));
         std::cout << "norm: " << tvec_vec.norm() << std::endl;
