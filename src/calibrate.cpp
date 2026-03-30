@@ -575,7 +575,7 @@ void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d
     std::stringstream ss_rpy;
     auto rpy_rad = rpy * M_PI / 180;
     ss_rpy << std::fixed << std::setprecision(6); // 角度通常保留两位
-    ss_rpy << rpy_rad.z() << " " << rpy_rad.y() << " " << rpy_rad.x();
+    ss_rpy << rpy_rad.x() << " " << rpy_rad.y() << " " << rpy_rad.z();
 
     // 3. 构造注释内容
     std::stringstream ss_comment;
