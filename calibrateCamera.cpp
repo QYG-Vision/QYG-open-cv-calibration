@@ -5,6 +5,7 @@
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/opencv.hpp>
+#include "web_viewer.hpp"
 
 using namespace std;
 using namespace cv;
@@ -37,7 +38,9 @@ int main(int argc, char* argv[]) {
     // 初始化标定类
     auto calibrate_ = qd::calibrate::Calibrate(config_path);
 
-    namedWindow("相机标定");
+    // namedWindow("相机标定");
+    qd::WebViewer viewer(8080);
+    viewer.namedWindow("相机标定");
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
     std::cout << "开始标定，操作说明：\n"
@@ -58,7 +61,8 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        int key = waitKey(wait_time);
+        // int key = waitKey(wait_time);
+        int key = viewer.waitKey(wait_time);
         if (key == 'c') {
             if (calibrate_.calibrate_camera()) {
                 cv::destroyAllWindows();
@@ -74,7 +78,8 @@ int main(int argc, char* argv[]) {
 
         calibrate_.collect_camera(img, key == 's');
 
-        imshow("相机标定", img);
+        // imshow("相机标定", img);
+        viewer.imshow("相机标定", img);
     }
 
     device.reset();
