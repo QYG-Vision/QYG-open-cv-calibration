@@ -68,21 +68,21 @@ static const char* HTML_PAGE = R"html(<!DOCTYPE html>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#1e1e2e;color:#cdd6f4;font-family:system-ui,-apple-system,sans-serif;
-     display:flex;flex-direction:column;min-height:100vh}
+     display:flex;flex-direction:column;height:100vh;overflow:hidden}
 header{background:#181825;padding:14px 24px;display:flex;align-items:center;
        justify-content:space-between;border-bottom:1px solid #313244}
 header h1{font-size:18px;font-weight:600;letter-spacing:.5px}
 header .dot{width:10px;height:10px;border-radius:50%;background:#a6e3a1;
             display:inline-block;margin-right:8px}
 header .dot.off{background:#f38ba8}
-main{flex:1;display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-start;
-     gap:20px;padding:20px}
+main{flex:1;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;
+     gap:20px;padding:20px;overflow:hidden;min-height:0}
 .card{background:#313244;border-radius:10px;overflow:hidden;
       box-shadow:0 4px 16px rgba(0,0,0,.35);min-width:320px;max-width:90vw}
 .card .title{padding:10px 16px;background:#45475a;font-size:13px;font-weight:500;
              letter-spacing:.3px;display:flex;align-items:center;gap:8px}
 .card .title .icon{opacity:.6}
-.card img{display:block;width:100%;height:auto;background:#11111b}
+.card img{display:block;max-width:100%;max-height:calc(100vh - 140px);object-fit:contain;background:#11111b}
 .empty{color:#6c7086;font-size:15px;padding:40px;text-align:center}
 footer{background:#181825;padding:10px 24px;font-size:12px;color:#6c7086;
        border-top:1px solid #313244;display:flex;justify-content:space-between}
