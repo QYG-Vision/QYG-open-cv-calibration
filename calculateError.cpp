@@ -4,6 +4,7 @@
 #include <memory>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
+#include "web_viewer.hpp"
 
 using namespace std;
 using namespace cv;
@@ -35,9 +36,11 @@ int main(int argc, char* argv[]) {
     // 初始化标定类
     auto calibrate_ = qd::calibrate::Calibrate(config_path);
 
-    namedWindow("重投影误差");
+    // namedWindow("重投影误差");
     std::chrono::steady_clock::time_point timestamp;
     int count = 0;
+        qd::WebViewer viewer(8080);
+    viewer.namedWindow("重投影误差");
     while (true) {
         // 获取图像和串口数据
         Mat img;
@@ -53,8 +56,11 @@ int main(int argc, char* argv[]) {
         }
 
         calibrate_.display_error(img);
-        imshow("重投影误差", img);
-        waitKey(wait_time);
+        // imshow("重投影误差", img);
+        viewer.imshow("重投影误差", img);
+        int key = viewer.waitKey(wait_time);
+
+        // waitKey(wait_time);
     }
 
     return 0;

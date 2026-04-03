@@ -5,6 +5,7 @@
 #include <memory>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
+#include "web_viewer.hpp"
 
 using namespace std;
 using namespace cv;
@@ -57,11 +58,13 @@ int main(int argc, char* argv[]) {
     // 手眼标定串口
     std::unique_ptr<Serial_driver> protocol_ = std::make_unique<Serial_driver>(config_path);
     
-    namedWindow("手眼标定");
+    // namedWindow("手眼标定");
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
     std::cout << "开始标定，按 'c' 键开始计算标定参数，按 's' 键采集数据，按 'ESC' 键退出"
               << std::endl;
+    qd::WebViewer viewer(8080);
+    viewer.namedWindow("手眼标定");
     while (true) {
         // 获取图像和串口数据
         Mat img;
@@ -76,7 +79,9 @@ int main(int argc, char* argv[]) {
 
 
         // 处理键盘输入
-        int key = waitKey(10);
+        // int key = waitKey(10);
+        int key = viewer.waitKey(10);
+
         if (key == 'c') {
             calibrate_.calibrate_handeye();
             cv::destroyAllWindows();
@@ -94,7 +99,9 @@ int main(int argc, char* argv[]) {
         calibrate_.show_collected_corners(img);
         calibrate_.display_rpy(img, q); // 可视化角度
 
-        imshow("手眼标定", img);
+        // imshow("手眼标定", img);
+        viewer.imshow("手眼标定", img);
+
     }
 
     std::cout << "标定完成，程序退出" << std::endl;
