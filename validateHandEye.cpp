@@ -5,6 +5,7 @@
 #include <memory>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
+#include "web_viewer.hpp"
 
 using namespace std;
 using namespace cv;
@@ -47,7 +48,9 @@ int main(int argc, char* argv[]) {
     // 手眼标定串口（用于获取云台姿态进行对比）
     std::unique_ptr<Serial_driver> protocol_ = std::make_unique<Serial_driver>(config_path);
 
-    namedWindow("手眼标定验证", WINDOW_NORMAL);
+        qd::WebViewer viewer(8080);
+    viewer.namedWindow("手眼标定验证");
+
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
 
@@ -74,8 +77,9 @@ int main(int argc, char* argv[]) {
         // 显示云台姿态（用于参考）
         // calibrate_.display_rpy(img, q);
 
-        imshow("手眼标定验证", img);
-        int key = waitKey(10);
+        viewer.imshow("手眼标定验证", img);
+
+        int key = viewer.waitKey(10);
         if (key == 27) {
             break;
         } else if (key == 'r' || key == 'R') {
