@@ -266,9 +266,11 @@ private:
         const Eigen::Vector3d& rpy
     );
     /**
-    @brief 输出手眼标定数据
+    @brief 输出手眼标定数据（含标定板位姿信息）
     */
-    void print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d& rpy);
+    void print_yaml(
+        const cv::Mat& t_camera2gimbal, const Eigen::Vector3d& rpy,
+        double board_distance, const Eigen::Vector3d& board_ypr);
     /**
     * @brief 保存手眼标定结果到YAML文件
     * @param R_camera2gimbal 相机到云台的旋转矩阵
@@ -307,8 +309,8 @@ private:
     int calibrateCamera_flags_ = cv::CALIB_FIX_K3;
 
     std::vector<cv::Mat> rvecs, tvecs;
-    // 手眼标定用数据
-    std::vector<cv::Mat> R_gimbal2world_list, t_gimbal2world_list;
+    // 手眼标定用数据（calibrateRobotWorldHandEye 需要 world2gimbal）
+    std::vector<cv::Mat> R_world2gimbal_list, t_world2gimbal_list;
     // 手眼标定结果（用于验证）
     cv::Mat R_camera2gimbal;
     cv::Mat t_camera2gimbal;

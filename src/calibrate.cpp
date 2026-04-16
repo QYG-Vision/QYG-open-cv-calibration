@@ -425,14 +425,15 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
         this->rvecs.push_back(rvec);
         this->tvecs.push_back(tvec);
 
-        // 计算云台的欧拉角
+        // calibrateRobotWorldHandEye 需要 R_world2gimbal（R_gimbal2world 的转置）
         Eigen::Matrix3d R_gimbal2world = q.toRotationMatrix();
-        cv::Mat t_gimbal2world = (cv::Mat_<double>(3, 1) << 0, 0, 0);
-        cv::Mat R_gimbal2world_cv;
-        cv::eigen2cv(R_gimbal2world, R_gimbal2world_cv);
+        Eigen::Matrix3d R_world2gimbal = R_gimbal2world.transpose();
+        cv::Mat t_world2gimbal = (cv::Mat_<double>(3, 1) << 0, 0, 0);
+        cv::Mat R_world2gimbal_cv;
+        cv::eigen2cv(R_world2gimbal, R_world2gimbal_cv);
 
-        this->R_gimbal2world_list.emplace_back(R_gimbal2world_cv);
-        this->t_gimbal2world_list.emplace_back(t_gimbal2world);
+        this->R_world2gimbal_list.emplace_back(R_world2gimbal_cv);
+        this->t_world2gimbal_list.emplace_back(t_world2gimbal);
 
         // 计数
         this->collected_count++;
@@ -488,38 +489,58 @@ bool Calibrate::display_rpy(cv::Mat& img, const Eigen::Quaterniond& q) {
 }
 
 void Calibrate::calibrate_handeye() {
-    // 手眼标定
-    std::cout << "Start calibrate_handeye !!! " << std::endl;
+    // 手眼标定（使用 calibrateRobotWorldHandEye，可同时求解标定板在世界坐标系中的位姿）
+    std::cout << "Start calibrate_handeye (RobotWorldHandEye) !!! " << std::endl;
     tm.reset();
     tm.start();
-    cv::Mat R_camera2gimbal, t_camera2gimbal;
-    cv::calibrateHandEye(
-        this->R_gimbal2world_list,
-        this->t_gimbal2world_list,
+    cv::Mat R_gimbal2camera, t_gimbal2camera;
+    cv::Mat R_world2board, t_world2board;
+    cv::calibrateRobotWorldHandEye(
         this->rvecs,
         this->tvecs,
-        R_camera2gimbal,
-        t_camera2gimbal,
-        cv::CALIB_HAND_EYE_TSAI
+        this->R_world2gimbal_list,
+        this->t_world2gimbal_list,
+        R_world2board,
+        t_world2board,
+        R_gimbal2camera,
+        t_gimbal2camera
     );
     tm.stop();
-    std::cout << "calibrateHandeye Latency:" << tm.getTimeSec() << " s" << std::endl;
+    std::cout << "calibrateRobotWorldHandEye Latency:" << tm.getTimeSec() << " s" << std::endl;
 
-    t_camera2gimbal /= 1e3; // mm to m
+    t_gimbal2camera /= 1e3; // mm to m
+    t_world2board /= 1e3;   // mm to m
+
+    // 反转得到 camera2gimbal 和 board2world
+    cv::Mat R_camera2gimbal, t_camera2gimbal;
+    cv::Mat R_board2world, t_board2world;
+    cv::transpose(R_gimbal2camera, R_camera2gimbal);
+    cv::transpose(R_world2board, R_board2world);
+    t_camera2gimbal = -R_camera2gimbal * t_gimbal2camera;
+    t_board2world = -R_board2world * t_world2board;
 
     // 计算相机同理想情况的偏角
     Eigen::Matrix3d R_cameraRDU2gimbalFLU_eigen;
     cv::cv2eigen(R_camera2gimbal, R_cameraRDU2gimbalFLU_eigen);
-    Eigen::Matrix3d R_gimbal2ideal { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } }; // 轴变化矩阵
+    Eigen::Matrix3d R_gimbal2ideal { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } };
 
-    // 输出yaml
     Eigen::Matrix3d R_cameraFLU2gimbalFLU =
-        R_cameraRDU2gimbalFLU_eigen * R_gimbal2ideal; // 变更camera坐标系为FLU
-    // Eigen::Matrix3d R_gimbalFLU2cameraFLU = R_cameraFLU2gimbalFLU.transpose();
+        R_cameraRDU2gimbalFLU_eigen * R_gimbal2ideal;
     Eigen::Vector3d rpy =
         eulers(Eigen::Quaterniond { R_cameraFLU2gimbalFLU }, 2, 1, 0) * 180 / M_PI; // degree
+
+    // 计算标定板到世界坐标系原点的水平距离
+    auto bx = t_board2world.at<double>(0);
+    auto by = t_board2world.at<double>(1);
+    double board_distance = std::sqrt(bx * bx + by * by);
+
+    // 计算标定板同竖直摆放时的偏角
+    Eigen::Matrix3d R_board2world_eigen;
+    cv::cv2eigen(R_board2world, R_board2world_eigen);
+    Eigen::Vector3d board_ypr = eulers(R_board2world_eigen, 2, 1, 0, false) * 180 / M_PI;
+
     // 输出标定信息
-    print_yaml(t_camera2gimbal, rpy);
+    print_yaml(t_camera2gimbal, rpy, board_distance, board_ypr);
     rpy = eulers(Eigen::Quaterniond { R_cameraRDU2gimbalFLU_eigen.transpose() }, 2, 1, 0) * 180
         / M_PI;
 
@@ -563,7 +584,10 @@ void Calibrate::print_yaml(
     fmt::print("\n{}\n", result.c_str());
 }
 
-void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d& rpy) {
+void Calibrate::print_yaml(
+    const cv::Mat& t_camera2gimbal, const Eigen::Vector3d& rpy,
+    double board_distance, const Eigen::Vector3d& board_ypr
+) {
     // 1. 格式化 xyz 字符串: "x y z"
     std::stringstream ss_xyz;
     ss_xyz << std::fixed << std::setprecision(6);
@@ -574,15 +598,10 @@ void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d
     // 2. 格式化 rpy 字符串: "yaw pitch roll"
     std::stringstream ss_rpy;
     auto rpy_rad = rpy * M_PI / 180;
-    ss_rpy << std::fixed << std::setprecision(6); // 角度通常保留两位
+    ss_rpy << std::fixed << std::setprecision(6);
     ss_rpy << rpy_rad.x() << " " << rpy_rad.y() << " " << rpy_rad.z();
 
-    // 3. 构造注释内容
-    std::stringstream ss_comment;
-    ss_comment << "相机同理想情况的偏角: yaw" << rpy.z() << " pitch" << rpy.y() << " roll"
-               << rpy.x() << " degree";
-
-    // 4. 使用 Emitter 手写 YAML 以精确控制注释位置
+    // 3. 使用 Emitter 手写 YAML 以精确控制注释位置
     YAML::Emitter out;
     out << YAML::BeginMap;
     out << YAML::Key << "odom2camera";
@@ -595,7 +614,7 @@ void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d
     // 写入带注释的 rpy
     out << YAML::Newline;
     out << YAML::Comment(fmt::format(
-        "相机同理想情况的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree ",
+        "相机同理想情况的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
         rpy[2],
         rpy[1],
         rpy[0]
@@ -604,6 +623,16 @@ void Calibrate::print_yaml(const cv::Mat& t_camera2gimbal, const Eigen::Vector3d
     out << YAML::Value << "\"" + ss_rpy.str() + "\"";
 
     out << YAML::EndMap;
+
+    // 标定板位姿信息（辅助验证标定结果合理性）
+    out << YAML::Newline;
+    out << YAML::Comment(fmt::format(
+        "标定板到世界坐标系原点的水平距离: {:.2f} m", board_distance));
+    out << YAML::Newline;
+    out << YAML::Comment(fmt::format(
+        "标定板同竖直摆放时的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
+        board_ypr[0], board_ypr[1], board_ypr[2]));
+
     out << YAML::EndMap;
 
     std::cout << out.c_str() << std::endl;
@@ -1108,8 +1137,8 @@ bool Calibrate::load_handeye_data_from_folder(const std::string& folder_path) {
     img_points.clear();
     rvecs.clear();
     tvecs.clear();
-    R_gimbal2world_list.clear();
-    t_gimbal2world_list.clear();
+    R_world2gimbal_list.clear();
+    t_world2gimbal_list.clear();
     collected_count = 0;
 
     // 获取所有图片文件
@@ -1223,14 +1252,15 @@ bool Calibrate::load_handeye_data_from_folder(const std::string& folder_path) {
         this->rvecs.push_back(rvec);
         this->tvecs.push_back(tvec);
 
-        // 计算云台的旋转矩阵
+        // calibrateRobotWorldHandEye 需要 R_world2gimbal（R_gimbal2world 的转置）
         Eigen::Matrix3d R_gimbal2world = q.toRotationMatrix();
-        cv::Mat t_gimbal2world = (cv::Mat_<double>(3, 1) << 0, 0, 0);
-        cv::Mat R_gimbal2world_cv;
-        cv::eigen2cv(R_gimbal2world, R_gimbal2world_cv);
+        Eigen::Matrix3d R_world2gimbal = R_gimbal2world.transpose();
+        cv::Mat t_world2gimbal = (cv::Mat_<double>(3, 1) << 0, 0, 0);
+        cv::Mat R_world2gimbal_cv;
+        cv::eigen2cv(R_world2gimbal, R_world2gimbal_cv);
 
-        this->R_gimbal2world_list.emplace_back(R_gimbal2world_cv);
-        this->t_gimbal2world_list.emplace_back(t_gimbal2world);
+        this->R_world2gimbal_list.emplace_back(R_world2gimbal_cv);
+        this->t_world2gimbal_list.emplace_back(t_world2gimbal);
 
         loaded_count++;
     }
