@@ -1141,11 +1141,13 @@ bool Calibrate::load_handeye_data_from_folder(const std::string& folder_path) {
     t_world2gimbal_list.clear();
     collected_count = 0;
 
-    // 获取所有图片文件
+    // 获取所有图片文件。cv::glob 会覆盖输出向量，这里分扩展名收集后合并。
     std::vector<std::string> image_files;
-    cv::glob(folder_path + "/image_*.jpg", image_files);
-    cv::glob(folder_path + "/image_*.png", image_files);
-    cv::glob(folder_path + "/image_*.bmp", image_files);
+    for (const auto& ext: { "jpg", "png", "bmp" }) {
+        std::vector<std::string> matched_files;
+        cv::glob(folder_path + "/image_*." + ext, matched_files);
+        image_files.insert(image_files.end(), matched_files.begin(), matched_files.end());
+    }
 
     if (image_files.empty()) {
         std::cerr << "未找到图片文件在路径: " << folder_path << std::endl;
