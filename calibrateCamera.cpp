@@ -54,10 +54,13 @@ int main(int argc, char* argv[]) {
         device->read(img, timestamp);
 
         if (img.empty()) {
-            cout << "image is empty" << endl;
-            if (calibrate_.calibrate_camera()) {
-                break;
+            if (device->is_exhausted()) {
+                std::cout << "离线图像已读取完毕，开始执行标定。" << std::endl;
+                cv::destroyAllWindows();
+                return calibrate_.calibrate_camera() ? 0 : 1;
             }
+
+            cout << "image is empty" << endl;
             continue;
         }
 

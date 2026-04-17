@@ -31,12 +31,18 @@ public:
      * @param timestamp 输出时间戳
      */
     void read(cv::Mat& img, std::chrono::steady_clock::time_point& timestamp) override;
+    /**
+     * @brief 离线图片序列是否已经读完
+     */
+    bool is_exhausted() const override;
 
 private:
     cv::VideoCapture cap;
     cv::Mat image;
     std::vector<cv::String> filenames;
     int index;
+    bool exhausted_ { false };
+    bool reported_exhausted_ { false };
 };
 
 } // namespace qd::Device

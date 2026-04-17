@@ -34,6 +34,11 @@ namespace Device {
          * @param timestamp 输出时间戳
          */
         virtual void read(cv::Mat& img, std::chrono::steady_clock::time_point& timestamp) = 0;
+        /**
+         * @brief 当前数据源是否已经耗尽
+         * @return true 仅对有限离线数据源返回 true
+         */
+        virtual bool is_exhausted() const { return false; }
         // virtual void read(cv::Mat&, std::chrono::steady_clock::time_point&)=0;
     };
 
