@@ -119,6 +119,8 @@ bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
     bool found = find_Chessboard(img, pixel_points);
 
     vector<Point3f> object_points;
+
+    auto img_back = img.clone();
     if (found) {
         object_points = calcChessboardCorners(pixel_points);
         object_points[paramer.boardSize.width - 1].x =
@@ -157,7 +159,7 @@ bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
             this->obj_points.push_back(object_points);
             this->img_points.push_back(pixel_points);
             this->collected_count++;
-            save_camera_image(img, this->collected_count);
+            save_camera_image(img_back, this->collected_count);
         }
     } else if (auto_collect_enabled_) {
         draw_progress_bars(img, nullptr);
