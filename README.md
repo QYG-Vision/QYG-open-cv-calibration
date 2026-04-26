@@ -22,9 +22,15 @@ Ubuntu/Debian：
 ```bash
 sudo apt update
 sudo apt install -y cmake g++ libopencv-dev libyaml-cpp-dev libfmt-dev libeigen3-dev
+# 写入海康相机 udev 规则
+sudo tee /etc/udev/rules.d/80-drivers-SDK-2bdf.rules >/dev/null <<'EOF'
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="2bdf", MODE="0666", GROUP="plugdev"
+EOF
+# 重新加载规则
+sudo udevadm control --reload-rules
+# 触发当前已连接设备的规则应用
+sudo udevadm trigger --action=add --subsystem-match=usb --attr-match=idVendor=2bdf
 ```
-
-> 如果使用海康相机，请确保 `hikSDK` 相关动态库可被系统找到（例如配置 `LD_LIBRARY_PATH`）。
 
 ---
 
