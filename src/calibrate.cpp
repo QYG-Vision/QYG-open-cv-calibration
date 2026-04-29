@@ -119,6 +119,8 @@ bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
     bool found = find_Chessboard(img, pixel_points);
 
     vector<Point3f> object_points;
+
+    auto img_back = img.clone();
     if (found) {
         object_points = calcChessboardCorners(pixel_points);
         object_points[paramer.boardSize.width - 1].x =
@@ -157,7 +159,7 @@ bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
             this->obj_points.push_back(object_points);
             this->img_points.push_back(pixel_points);
             this->collected_count++;
-            save_camera_image(img, this->collected_count);
+            save_camera_image(img_back, this->collected_count);
         }
     } else if (auto_collect_enabled_) {
         draw_progress_bars(img, nullptr);
@@ -434,6 +436,7 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
 
         this->R_world2gimbal_list.emplace_back(R_world2gimbal_cv);
         this->t_world2gimbal_list.emplace_back(t_world2gimbal);
+        this->handeye_ypr_deg_list_.emplace_back(eulers(q, 2, 1, 0) * 180 / M_PI);
 
         // 计数
         this->collected_count++;
@@ -541,13 +544,20 @@ void Calibrate::calibrate_handeye() {
     Eigen::Vector3d board_ypr =
         eulers(Eigen::Quaterniond { R_boardFLU2worldFLU }, 2, 1, 0) * 180 / M_PI;
 
+    const auto handeye_rpy_range = calculate_handeye_rpy_range();
     // 输出标定信息
-    print_yaml(t_camera2gimbal, rpy, board_distance, board_ypr);
+    print_yaml(t_camera2gimbal, rpy, board_distance, board_ypr, handeye_rpy_range);
     rpy = eulers(Eigen::Quaterniond { R_cameraRDU2gimbalFLU_eigen.transpose() }, 2, 1, 0) * 180
         / M_PI;
 
     // 保存手眼标定结果到文件
-    saveHandEyeCalibrationYAML(R_camera2gimbal, t_camera2gimbal, rpy, "handeye_calibration.yaml");
+    saveHandEyeCalibrationYAML(
+        R_camera2gimbal,
+        t_camera2gimbal,
+        rpy,
+        handeye_rpy_range,
+        "handeye_calibration.yaml"
+    );
 }
 
 void Calibrate::print_yaml(
@@ -587,8 +597,11 @@ void Calibrate::print_yaml(
 }
 
 void Calibrate::print_yaml(
-    const cv::Mat& t_camera2gimbal, const Eigen::Vector3d& rpy,
-    double board_distance, const Eigen::Vector3d& board_ypr
+    const cv::Mat& t_camera2gimbal,
+    const Eigen::Vector3d& rpy,
+    double board_distance,
+    const Eigen::Vector3d& board_ypr,
+    const RpyRange& handeye_rpy_range
 ) {
     // 1. 格式化 xyz 字符串: "x y z"
     std::stringstream ss_xyz;
@@ -636,6 +649,26 @@ void Calibrate::print_yaml(
         board_ypr[0], board_ypr[1], board_ypr[2]));
 
     out << YAML::EndMap;
+
+    if (handeye_rpy_range.valid) {
+        fmt::print(
+            "{}\n"
+            "lower_machine_rpy_range_deg:\n"
+            "  roll: [{:.2f}, {:.2f}]\n"
+            "  pitch: [{:.2f}, {:.2f}]\n"
+            "  yaw: [{:.2f}, {:.2f}]\n"
+            "lower_machine_rpy_range_sample_count: {}\n",
+            out.c_str(),
+            handeye_rpy_range.min_ypr_deg[2],
+            handeye_rpy_range.max_ypr_deg[2],
+            handeye_rpy_range.min_ypr_deg[1],
+            handeye_rpy_range.max_ypr_deg[1],
+            handeye_rpy_range.min_ypr_deg[0],
+            handeye_rpy_range.max_ypr_deg[0],
+            handeye_ypr_deg_list_.size()
+        );
+        return;
+    }
 
     std::cout << out.c_str() << std::endl;
 }
@@ -706,6 +739,7 @@ void Calibrate::saveHandEyeCalibrationYAML(
     const cv::Mat& R_camera2gimbal,
     const cv::Mat& t_camera2gimbal,
     const Eigen::Vector3d& rpy,
+    const RpyRange& handeye_rpy_range,
     const std::string& filename
 ) {
     YAML::Node node;
@@ -731,9 +765,49 @@ void Calibrate::saveHandEyeCalibrationYAML(
     // 保存到文件
     std::ofstream fout(filename);
     fout << node;
+    if (handeye_rpy_range.valid) {
+        fout << "\nlower_machine_rpy_range_deg:\n";
+        fout << fmt::format(
+            "  roll: [{:.2f}, {:.2f}]\n",
+            handeye_rpy_range.min_ypr_deg[2],
+            handeye_rpy_range.max_ypr_deg[2]
+        );
+        fout << fmt::format(
+            "  pitch: [{:.2f}, {:.2f}]\n",
+            handeye_rpy_range.min_ypr_deg[1],
+            handeye_rpy_range.max_ypr_deg[1]
+        );
+        fout << fmt::format(
+            "  yaw: [{:.2f}, {:.2f}]\n",
+            handeye_rpy_range.min_ypr_deg[0],
+            handeye_rpy_range.max_ypr_deg[0]
+        );
+        fout << fmt::format(
+            "lower_machine_rpy_range_sample_count: {}\n",
+            handeye_ypr_deg_list_.size()
+        );
+    }
     fout.close();
 
     std::cout << "手眼标定结果已保存到 " << filename << std::endl;
+}
+
+Calibrate::RpyRange Calibrate::calculate_handeye_rpy_range() const {
+    RpyRange range;
+    if (handeye_ypr_deg_list_.empty()) {
+        return range;
+    }
+
+    range.valid = true;
+    range.min_ypr_deg = handeye_ypr_deg_list_.front();
+    range.max_ypr_deg = handeye_ypr_deg_list_.front();
+
+    for (const auto& ypr_deg: handeye_ypr_deg_list_) {
+        range.min_ypr_deg = range.min_ypr_deg.cwiseMin(ypr_deg);
+        range.max_ypr_deg = range.max_ypr_deg.cwiseMax(ypr_deg);
+    }
+
+    return range;
 }
 
 bool Calibrate::load_handeye_calibration(const std::string& handeye_yaml_path) {
@@ -1141,6 +1215,7 @@ bool Calibrate::load_handeye_data_from_folder(const std::string& folder_path) {
     tvecs.clear();
     R_world2gimbal_list.clear();
     t_world2gimbal_list.clear();
+    handeye_ypr_deg_list_.clear();
     collected_count = 0;
 
     // 获取所有图片文件。cv::glob 会覆盖输出向量，这里分扩展名收集后合并。
@@ -1265,6 +1340,18 @@ bool Calibrate::load_handeye_data_from_folder(const std::string& folder_path) {
 
         this->R_world2gimbal_list.emplace_back(R_world2gimbal_cv);
         this->t_world2gimbal_list.emplace_back(t_world2gimbal);
+
+        Eigen::Vector3d ypr_deg = eulers(q, 2, 1, 0) * 180 / M_PI;
+        if (pose_node["rpy_deg"]) {
+            const auto rpy_deg_data = pose_node["rpy_deg"].as<std::vector<double>>();
+            if (rpy_deg_data.size() == 3) {
+                ypr_deg = Eigen::Vector3d(rpy_deg_data[0], rpy_deg_data[1], rpy_deg_data[2]);
+            } else {
+                std::cerr << "警告: rpy_deg格式错误，将由四元数重新计算: " << pose_path
+                          << std::endl;
+            }
+        }
+        this->handeye_ypr_deg_list_.emplace_back(ypr_deg);
 
         loaded_count++;
     }

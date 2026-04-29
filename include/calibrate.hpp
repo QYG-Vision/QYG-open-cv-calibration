@@ -158,6 +158,12 @@ public:
     bool is_auto_collect_enabled() const { return auto_collect_enabled_; }
 
 private:
+    struct RpyRange {
+        bool valid { false };
+        Eigen::Vector3d min_ypr_deg { Eigen::Vector3d::Zero() };
+        Eigen::Vector3d max_ypr_deg { Eigen::Vector3d::Zero() };
+    };
+
     /**
     @brief 获取标定板角点
     */
@@ -269,21 +275,32 @@ private:
     @brief 输出手眼标定数据（含标定板位姿信息）
     */
     void print_yaml(
-        const cv::Mat& t_camera2gimbal, const Eigen::Vector3d& rpy,
-        double board_distance, const Eigen::Vector3d& board_ypr);
+        const cv::Mat& t_camera2gimbal,
+        const Eigen::Vector3d& rpy,
+        double board_distance,
+        const Eigen::Vector3d& board_ypr,
+        const RpyRange& handeye_rpy_range
+    );
     /**
     * @brief 保存手眼标定结果到YAML文件
     * @param R_camera2gimbal 相机到云台的旋转矩阵
     * @param t_camera2gimbal 相机到云台的平移向量
     * @param rpy 相机同理想情况的偏角
+    * @param handeye_rpy_range 参与标定的下位机 RPY 姿态角范围
     * @param filename 输出的YAML文件路径
     */
     void saveHandEyeCalibrationYAML(
         const cv::Mat& R_camera2gimbal,
         const cv::Mat& t_camera2gimbal,
         const Eigen::Vector3d& rpy,
+        const RpyRange& handeye_rpy_range,
         const std::string& filename
     );
+
+    /**
+     * @brief 统计参与手眼标定的下位机 RPY 姿态角范围
+     */
+    RpyRange calculate_handeye_rpy_range() const;
 
     /**
      * @brief 计算标定板角点的最小距离
@@ -311,6 +328,7 @@ private:
     std::vector<cv::Mat> rvecs, tvecs;
     // 手眼标定用数据（calibrateRobotWorldHandEye 需要 world2gimbal）
     std::vector<cv::Mat> R_world2gimbal_list, t_world2gimbal_list;
+    std::vector<Eigen::Vector3d> handeye_ypr_deg_list_;
     // 手眼标定结果（用于验证）
     cv::Mat R_camera2gimbal;
     cv::Mat t_camera2gimbal;
