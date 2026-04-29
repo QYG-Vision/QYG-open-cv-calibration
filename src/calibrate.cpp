@@ -522,10 +522,10 @@ void Calibrate::calibrate_handeye() {
     // 计算相机同理想情况的偏角
     Eigen::Matrix3d R_cameraRDU2gimbalFLU_eigen;
     cv::cv2eigen(R_camera2gimbal, R_cameraRDU2gimbalFLU_eigen);
-    Eigen::Matrix3d R_gimbal2ideal { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } };
+    const Eigen::Matrix3d R_flu2rdu { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } };
 
     Eigen::Matrix3d R_cameraFLU2gimbalFLU =
-        R_cameraRDU2gimbalFLU_eigen * R_gimbal2ideal;
+        R_cameraRDU2gimbalFLU_eigen * R_flu2rdu;
     Eigen::Vector3d rpy =
         eulers(Eigen::Quaterniond { R_cameraFLU2gimbalFLU }, 2, 1, 0) * 180 / M_PI; // degree
 
@@ -535,9 +535,11 @@ void Calibrate::calibrate_handeye() {
     double board_distance = std::sqrt(bx * bx + by * by);
 
     // 计算标定板同竖直摆放时的偏角
-    Eigen::Matrix3d R_board2world_eigen;
-    cv::cv2eigen(R_board2world, R_board2world_eigen);
-    Eigen::Vector3d board_ypr = eulers(R_board2world_eigen, 2, 1, 0, false) * 180 / M_PI;
+    Eigen::Matrix3d R_boardRDU2worldFLU;
+    cv::cv2eigen(R_board2world, R_boardRDU2worldFLU);
+    Eigen::Matrix3d R_boardFLU2worldFLU = R_boardRDU2worldFLU * R_flu2rdu;
+    Eigen::Vector3d board_ypr =
+        eulers(Eigen::Quaterniond { R_boardFLU2worldFLU }, 2, 1, 0) * 180 / M_PI;
 
     // 输出标定信息
     print_yaml(t_camera2gimbal, rpy, board_distance, board_ypr);
@@ -604,7 +606,7 @@ void Calibrate::print_yaml(
     // 3. 使用 Emitter 手写 YAML 以精确控制注释位置
     YAML::Emitter out;
     out << YAML::BeginMap;
-    out << YAML::Key << "odom2camera";
+    out << YAML::Key << "gimbal2camera";
     out << YAML::Value << YAML::BeginMap;
 
     // 写入 xyz
@@ -630,7 +632,7 @@ void Calibrate::print_yaml(
         "标定板到世界坐标系原点的水平距离: {:.2f} m", board_distance));
     out << YAML::Newline;
     out << YAML::Comment(fmt::format(
-        "标定板同竖直摆放时的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
+        "标定板同竖直摆放时的偏角(gimbal2camera/FLU): yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
         board_ypr[0], board_ypr[1], board_ypr[2]));
 
     out << YAML::EndMap;
