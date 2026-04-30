@@ -38,12 +38,12 @@ Serial:
 camera_calib_save_path: ./camera_calib_images  # 相机标定图片保存路径
 handeye_calib_save_path: ./handeye_calib_data   # 手眼标定数据保存路径（包含图片和姿态信息）
 
-# 自动采集配置（类似 ROS camera_calibration）
+# 自动采集配置（直接移植自 ROS image_pipeline/camera_calibration）
 # 按 'a' 键在运行时切换，或在此直接设为 true 启动即启用
-auto_collect_enabled: true      # 是否默认启用自动采集
-auto_collect_interval_ms: 50    # 两次自动采集的最小间隔（毫秒）
-auto_collect_x_bins: 20           # 图像 X 方向位置分块数
-auto_collect_y_bins: 20          # 图像 Y 方向位置分块数
-auto_collect_size_bins: 20        # 标定板大小分块数
-auto_collect_skew_bins: 20        # 标定板倾斜角分块数
-auto_collect_sharpness_threshold: 40.0  # 清晰度阈值（拉普拉斯方差），低于此值判定为拖影/模糊，拒绝采集
+auto_collect_enabled: true               # 是否默认启用自动采集
+auto_collect_interval_ms: 50             # 两次自动采集的最小间隔（毫秒，本工程额外限频项）
+auto_collect_param_distance: 0.2         # 与历史样本的最小 L1 距离（ROS 默认 0.2）
+auto_collect_param_ranges: [0.7, 0.7, 0.4, 0.5]  # X/Y/Size/Skew 的覆盖目标范围（ROS 默认）
+auto_collect_goodenough_samples: 40      # 即便部分维度未覆盖，达到该样本数也视为可标定（ROS 默认 40）
+auto_collect_max_chessboard_speed: -1.0  # 角点平均位移阈值（像素/帧），<=0 关闭静止性检查
+auto_collect_sharpness_threshold: 40.0   # 拉普拉斯方差阈值，<=0 关闭清晰度过滤（对 ROS 的可选增强）
