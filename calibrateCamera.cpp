@@ -44,10 +44,11 @@ int main(int argc, char* argv[]) {
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
     std::cout << "开始标定，操作说明：\n"
-              << "  's' - 手动采集当前帧\n"
-              << "  'a' - 切换自动采集模式（类似 ROS camera_calibration）\n"
-              << "  'c' - 开始计算标定参数\n"
-              << "  'ESC' - 退出" << std::endl;
+              << "  's'   - 手动采集当前帧\n"
+              << "  'a'   - 切换自动采集模式（直接移植自 ROS image_pipeline/camera_calibration）\n"
+              << "  'c'   - 开始计算标定参数\n"
+              << "  'ESC' - 退出\n"
+              << "  自动采集策略：基于棋盘归一化参数 (X/Y/Size/Skew) 去重并统计覆盖度" << std::endl;
 
     while (true) {
         Mat img;
