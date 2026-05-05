@@ -11,7 +11,12 @@ cmake -S . -B build
 cmake --build build -j
 ```
 
-There is no test suite and no lint target wired into CMake. `.clang-format` and `.clang-tidy` exist at the repo root — invoke them directly (`clang-format -i <file>`, `clang-tidy -p build <file>`). `compile_commands.json` is exported for clangd.
+Tests are wired into CMake via CTest + GoogleTest (FetchContent). Enable with `-DBUILD_TESTING=ON`:
+```bash
+cmake -S . -B build -DBUILD_TESTING=ON && cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+Tests live in `tests/unit/` (library tests) and `tests/integration/` (CLI black-box). Test data under `tests/data/` is kept separate from production assets. `.clang-format` and `.clang-tidy` exist at the repo root — invoke them directly (`clang-format -i <file>`, `clang-tidy -p build <file>`). `compile_commands.json` is exported for clangd.
 
 The four executables all live in `build/` and accept `--config-path=<yaml>` (default `config/calibration.yaml`):
 

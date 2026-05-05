@@ -5,6 +5,8 @@
 #include <memory>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
+#include <string>
+#include <vector>
 #include "web_viewer.hpp"
 
 using namespace std;
@@ -14,8 +16,32 @@ using namespace qd;
 const std::string keys =
     "{help h usage ? |                          | 输出命令行参数说明}"
     "{config-path c  | config/calibration.yaml | yaml配置文件路径 }"
-    "{load-data l    |                          | 从文件夹加载已保存的手眼标定数据 }"
+    "{load-data l    | false                    | 从文件夹加载已保存的手眼标定数据 }"
     "{data-path d    | ./handeye_calib_data     | 手眼标定数据文件夹路径 }";
+
+/**
+ * @brief 预处理命令行参数，将 \"-k val\" 转换为 \"-k=val\"，
+ *        因为 cv::CommandLineParser 只支持等号分隔的键值对。
+ */
+static std::vector<std::string> normalize_args(int argc, char* argv[]) {
+    std::vector<std::string> out;
+    out.push_back(argv[0]);
+    for (int i = 1; i < argc; ++i) {
+        std::string arg(argv[i]);
+        // 如果是 -c / -d 这类单短横线 + 字母，且不含 '='，且下一参数不以 '-' 开头
+        if (arg.size() >= 2 && arg[0] == '-' && arg[1] != '-'
+            && arg.find('=') == std::string::npos
+            && i + 1 < argc
+            && argv[i + 1][0] != '-')
+        {
+            out.push_back(arg + "=" + argv[i + 1]);
+            ++i;
+        } else {
+            out.push_back(arg);
+        }
+    }
+    return out;
+}
 
 /**
  * @brief 手眼标定程序入口
@@ -24,15 +50,20 @@ const std::string keys =
  * @return int 退出码
  */
 int main(int argc, char* argv[]) {
+    // 预处理：将 -k val 转换为 -k=val（cv::CommandLineParser 要求等号分隔）
+    auto norm_args = normalize_args(argc, argv);
+    std::vector<const char*> norm_argv;
+    for (auto& s : norm_args) norm_argv.push_back(s.c_str());
+
     // 读取命令行参数
-    cv::CommandLineParser cli(argc, argv, keys);
+    cv::CommandLineParser cli(static_cast<int>(norm_argv.size()), norm_argv.data(), keys);
     if (cli.has("help")) {
         cli.printMessage();
         return 0;
     }
 
     auto config_path = cli.get<std::string>("config-path");
-    bool load_data = cli.has("load-data");
+    bool load_data = cli.get<bool>("load-data");
     auto data_path = cli.get<std::string>("data-path");
 
     // 初始化标定类

@@ -8,7 +8,14 @@ Companion to `CLAUDE.md` (read that first for full architecture). This file cove
 cmake -S . -B build && cmake --build build -j
 ```
 
-No test suite, no lint target in CMake. Format/tidy manually:
+Build with tests enabled:
+
+```bash
+cmake -S . -B build -DBUILD_TESTING=ON && cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+No lint target in CMake. Format/tidy manually:
 
 ```bash
 clang-format -i <file>

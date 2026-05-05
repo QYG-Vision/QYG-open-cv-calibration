@@ -1,5 +1,5 @@
 # cmake needs this line
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.14)
 ## Export compile commands for clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 17)
@@ -69,3 +69,73 @@ target_link_libraries(calibration_core
     Threads::Threads
     ${FILESYSTEM_LIBS}
 )
+
+# ============================================================
+# 测试体系
+# ============================================================
+include(CTest)
+
+option(BUILD_TESTING "Build unit and integration tests" OFF)
+
+if(BUILD_TESTING)
+    # ----- GoogleTest via FetchContent -----
+    include(FetchContent)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.15.2
+    )
+    # Prevent gtest from installing itself
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+    include(GoogleTest)
+
+    enable_testing()
+
+    # ----- 测试数据根目录 -----
+    set(TEST_DATA_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/data)
+
+    # ----- 单元测试 -----
+    # ThreadSafeQueue
+    add_executable(test_thread_safe_queue tests/unit/test_thread_safe_queue.cpp)
+    target_include_directories(test_thread_safe_queue PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(test_thread_safe_queue PRIVATE gtest_main Threads::Threads)
+    gtest_discover_tests(test_thread_safe_queue)
+
+    # AutoCollector
+    add_executable(test_auto_collector tests/unit/test_auto_collector.cpp)
+    target_include_directories(test_auto_collector PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(test_auto_collector
+        PRIVATE
+            gtest_main
+            calibration_core
+    )
+    gtest_discover_tests(test_auto_collector)
+
+    # Image_Reader
+    add_executable(test_image_reader tests/unit/test_image_reader.cpp)
+    target_include_directories(test_image_reader PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(test_image_reader
+        PRIVATE
+            gtest_main
+            calibration_core
+    )
+    gtest_discover_tests(test_image_reader)
+
+    # ----- 离线集成测试：手眼标定黑盒验证 -----
+    add_executable(test_handeye_offline tests/integration/test_handeye_offline.cpp)
+    target_include_directories(test_handeye_offline PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_compile_definitions(test_handeye_offline
+        PRIVATE
+            CALIBRATE_HANDEYE_BINARY="${CMAKE_CURRENT_BINARY_DIR}/calibrateHandEye"
+            TEST_DATA_DIR="${TEST_DATA_DIR}"
+    )
+    target_link_libraries(test_handeye_offline
+        PRIVATE
+            gtest_main
+            yaml-cpp
+    )
+    gtest_discover_tests(test_handeye_offline
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+endif()
