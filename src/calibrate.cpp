@@ -584,14 +584,13 @@ void Calibrate::calibrate_handeye() {
     const auto handeye_rpy_range = calculate_handeye_rpy_range();
     // 输出标定信息
     print_yaml(t_camera2gimbal, rpy, board_distance, board_ypr, handeye_rpy_range);
-    rpy = eulers(Eigen::Quaterniond { R_cameraRDU2gimbalFLU_eigen.transpose() }, 2, 1, 0) * 180
-        / M_PI;
 
-    // 保存手眼标定结果到文件
+    // 保存手眼标定结果到文件（与终端输出统一为 gimbal2camera 注释式格式）
     saveHandEyeCalibrationYAML(
-        R_camera2gimbal,
         t_camera2gimbal,
         rpy,
+        board_distance,
+        board_ypr,
         handeye_rpy_range,
         "handeye_calibration.yaml"
     );
@@ -666,7 +665,7 @@ void Calibrate::print_yaml(
     // 写入带注释的 rpy
     out << YAML::Newline;
     out << YAML::Comment(fmt::format(
-        "相机同理想情况的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
+        "相机同理想情况的偏角: roll{:.2f} pitch{:.2f} yaw{:.2f} degree",
         rpy[2],
         rpy[1],
         rpy[0]
@@ -690,11 +689,11 @@ void Calibrate::print_yaml(
     if (handeye_rpy_range.valid) {
         fmt::print(
             "{}\n"
-            "lower_machine_rpy_range_deg:\n"
-            "  roll: [{:.2f}, {:.2f}]\n"
-            "  pitch: [{:.2f}, {:.2f}]\n"
-            "  yaw: [{:.2f}, {:.2f}]\n"
-            "lower_machine_rpy_range_sample_count: {}\n",
+            "# rpy 旋转范围 degree:\n"
+            "#   roll: [{:.2f}, {:.2f}]\n"
+            "#   pitch: [{:.2f}, {:.2f}]\n"
+            "#   yaw: [{:.2f}, {:.2f}]\n"
+            "# 标定数量: {}\n",
             out.c_str(),
             handeye_rpy_range.min_ypr_deg[2],
             handeye_rpy_range.max_ypr_deg[2],
@@ -773,57 +772,80 @@ void Calibrate::display_error(cv::Mat& img) {
 }
 
 void Calibrate::saveHandEyeCalibrationYAML(
-    const cv::Mat& R_camera2gimbal,
-    const cv::Mat& t_camera2gimbal,
+    const cv::Mat& xyz_m,
     const Eigen::Vector3d& rpy,
+    double board_distance,
+    const Eigen::Vector3d& board_ypr,
     const RpyRange& handeye_rpy_range,
     const std::string& filename
 ) {
-    YAML::Node node;
+    // 1. 格式化 xyz 字符串: "x y z"
+    std::stringstream ss_xyz;
+    ss_xyz << std::fixed << std::setprecision(6);
+    for (int i = 0; i < 3; ++i) {
+        ss_xyz << xyz_m.at<double>(i) << (i == 2 ? "" : " ");
+    }
 
-    // 添加注释
-    node["comment"] = fmt::format(
-        "相机同理想情况的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
+    // 2. 格式化 rpy 字符串: "yaw pitch roll" (radians)
+    std::stringstream ss_rpy;
+    auto rpy_rad = rpy * M_PI / 180;
+    ss_rpy << std::fixed << std::setprecision(6);
+    ss_rpy << rpy_rad.x() << " " << rpy_rad.y() << " " << rpy_rad.z();
+
+    // 3. 用 Emitter 构建与终端一致的 gimbal2camera 结构
+    YAML::Emitter out;
+    out << YAML::BeginMap;
+    out << YAML::Key << "gimbal2camera";
+    out << YAML::Value << YAML::BeginMap;
+
+    out << YAML::Key << "xyz";
+    out << YAML::Value << "\"" + ss_xyz.str() + "\"";
+
+    out << YAML::Newline;
+    out << YAML::Comment(fmt::format(
+        "相机同理想情况的偏角: roll{:.2f} pitch{:.2f} yaw{:.2f} degree",
         rpy[2],
         rpy[1],
         rpy[0]
-    );
+    ));
+    out << YAML::Key << "rpy";
+    out << YAML::Value << "\"" + ss_rpy.str() + "\"";
 
-    // 保存R_camera2gimbal
-    std::vector<double> R_data(R_camera2gimbal.begin<double>(), R_camera2gimbal.end<double>());
-    node["R_camera2gimbal"] = R_data;
-    node["R_camera2gimbal"].SetStyle(YAML::EmitterStyle::Flow);
+    out << YAML::EndMap;
 
-    // 保存t_camera2gimbal
-    std::vector<double> t_data(t_camera2gimbal.begin<double>(), t_camera2gimbal.end<double>());
-    node["t_camera2gimbal"] = t_data;
-    node["t_camera2gimbal"].SetStyle(YAML::EmitterStyle::Flow);
+    // 标定板位姿信息（辅助验证标定结果合理性）
+    out << YAML::Newline;
+    out << YAML::Comment(fmt::format(
+        "标定板到世界坐标系原点的水平距离: {:.2f} m", board_distance));
+    out << YAML::Newline;
+    out << YAML::Comment(fmt::format(
+        "标定板同竖直摆放时的偏角(gimbal2camera/FLU): yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
+        board_ypr[0], board_ypr[1], board_ypr[2]));
 
-    // 保存到文件
+    out << YAML::EndMap;
+
+    // 4. 写入文件
     std::ofstream fout(filename);
-    fout << node;
+    fout << out.c_str();
+
     if (handeye_rpy_range.valid) {
-        fout << "\nlower_machine_rpy_range_deg:\n";
         fout << fmt::format(
-            "  roll: [{:.2f}, {:.2f}]\n",
+            "\n# rpy 旋转范围 degree:\n"
+            "#   roll: [{:.2f}, {:.2f}]\n"
+            "#   pitch: [{:.2f}, {:.2f}]\n"
+            "#   yaw: [{:.2f}, {:.2f}]\n"
+            "# 标定数量: {}\n",
             handeye_rpy_range.min_ypr_deg[2],
-            handeye_rpy_range.max_ypr_deg[2]
-        );
-        fout << fmt::format(
-            "  pitch: [{:.2f}, {:.2f}]\n",
+            handeye_rpy_range.max_ypr_deg[2],
             handeye_rpy_range.min_ypr_deg[1],
-            handeye_rpy_range.max_ypr_deg[1]
-        );
-        fout << fmt::format(
-            "  yaw: [{:.2f}, {:.2f}]\n",
+            handeye_rpy_range.max_ypr_deg[1],
             handeye_rpy_range.min_ypr_deg[0],
-            handeye_rpy_range.max_ypr_deg[0]
-        );
-        fout << fmt::format(
-            "lower_machine_rpy_range_sample_count: {}\n",
+            handeye_rpy_range.max_ypr_deg[0],
             handeye_ypr_deg_list_.size()
         );
     }
+
+    fout << "\n";
     fout.close();
 
     std::cout << "手眼标定结果已保存到 " << filename << std::endl;
@@ -851,8 +873,57 @@ bool Calibrate::load_handeye_calibration(const std::string& handeye_yaml_path) {
     try {
         auto yaml = YAML::LoadFile(handeye_yaml_path);
 
-        // 加载R_camera2gimbal
-        if (yaml["R_camera2gimbal"]) {
+        // ---- 新格式: gimbal2camera { xyz: "…", rpy: "…" } ----
+        if (yaml["gimbal2camera"]) {
+            const auto gc = yaml["gimbal2camera"];
+
+            if (!gc["xyz"] || !gc["rpy"]) {
+                std::cerr << "gimbal2camera 格式缺少 xyz 或 rpy" << std::endl;
+                return false;
+            }
+
+            // 解析 xyz 字符串 "x y z" (m)
+            std::string xyz_str = gc["xyz"].as<std::string>();
+            std::istringstream xyz_ss(xyz_str);
+            double x, y, z;
+            if (!(xyz_ss >> x >> y >> z)) {
+                std::cerr << "无法解析 gimbal2camera.xyz" << std::endl;
+                return false;
+            }
+            t_camera2gimbal = (cv::Mat_<double>(3, 1) << x, y, z) * 1e3; // m → mm
+
+            // 解析 rpy 字符串 "yaw pitch roll" (radians)
+            std::string rpy_str = gc["rpy"].as<std::string>();
+            std::istringstream rpy_ss(rpy_str);
+            double yaw, pitch, roll;
+            if (!(rpy_ss >> yaw >> pitch >> roll)) {
+                std::cerr << "无法解析 gimbal2camera.rpy" << std::endl;
+                return false;
+            }
+
+            // 从 yaw-pitch-roll (axes 2,1,0, extrinsic) 重建 camera2gimbal
+            Eigen::Matrix3d R_cameraFLU2gimbalFLU =
+                (Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ())
+                 * Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY())
+                 * Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX()))
+                    .toRotationMatrix();
+
+            // R_cameraRDU2gimbalFLU = R_cameraFLU2gimbalFLU * R_flu2rdu^(-1)
+            // R_flu2rdu = {{0,-1,0},{0,0,-1},{1,0,0}}
+            // R_flu2rdu^(-1) = {{0,0,1},{-1,0,0},{0,-1,0}}
+            Eigen::Matrix3d R_flu2rdu_inv;
+            R_flu2rdu_inv << 0,  0, 1,
+                           -1,  0, 0,
+                            0, -1, 0;
+            Eigen::Matrix3d R_cam2gimbal_eigen = R_cameraFLU2gimbalFLU * R_flu2rdu_inv;
+            cv::eigen2cv(R_cam2gimbal_eigen, R_camera2gimbal);
+
+            // debug
+            std::cout << "gimbal2camera xyz parsed: " << x << " " << y << " " << z << " (m)" << std::endl;
+            std::cout << "gimbal2camera rpy parsed: " << yaw << " " << pitch << " " << roll << " (rad)" << std::endl;
+        }
+        // ---- 旧格式: R_camera2gimbal / t_camera2gimbal (向后兼容) ----
+        else if (yaml["R_camera2gimbal"]) {
             auto R_data = yaml["R_camera2gimbal"].as<std::vector<double>>();
             if (R_data.size() == 9) {
                 R_camera2gimbal = cv::Mat(3, 3, CV_64F, R_data.data()).clone();
@@ -860,22 +931,21 @@ bool Calibrate::load_handeye_calibration(const std::string& handeye_yaml_path) {
                 std::cerr << "R_camera2gimbal数据格式错误，需要9个元素" << std::endl;
                 return false;
             }
-        } else {
-            std::cerr << "YAML文件中未找到R_camera2gimbal" << std::endl;
-            return false;
-        }
 
-        // 加载t_camera2gimbal
-        if (yaml["t_camera2gimbal"]) {
-            auto t_data = yaml["t_camera2gimbal"].as<std::vector<double>>();
-            if (t_data.size() == 3) {
-                t_camera2gimbal = cv::Mat(3, 1, CV_64F, t_data.data()).clone() * 1e3; // m to mm
+            if (yaml["t_camera2gimbal"]) {
+                auto t_data = yaml["t_camera2gimbal"].as<std::vector<double>>();
+                if (t_data.size() == 3) {
+                    t_camera2gimbal = cv::Mat(3, 1, CV_64F, t_data.data()).clone() * 1e3; // m to mm
+                } else {
+                    std::cerr << "t_camera2gimbal数据格式错误，需要3个元素" << std::endl;
+                    return false;
+                }
             } else {
-                std::cerr << "t_camera2gimbal数据格式错误，需要3个元素" << std::endl;
+                std::cerr << "YAML文件中未找到t_camera2gimbal" << std::endl;
                 return false;
             }
         } else {
-            std::cerr << "YAML文件中未找到t_camera2gimbal" << std::endl;
+            std::cerr << "YAML 中未找到 gimbal2camera 或 R_camera2gimbal" << std::endl;
             return false;
         }
 

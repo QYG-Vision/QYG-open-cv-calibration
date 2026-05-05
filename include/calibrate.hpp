@@ -263,17 +263,24 @@ private:
         const RpyRange& handeye_rpy_range
     );
     /**
-    * @brief 保存手眼标定结果到YAML文件
-    * @param R_camera2gimbal 相机到云台的旋转矩阵
-    * @param t_camera2gimbal 相机到云台的平移向量
-    * @param rpy 相机同理想情况的偏角
+    * @brief 保存手眼标定结果到 YAML 文件（gimbal2camera 注释式格式）
+    *
+    * 输出与终端 print_yaml() 一致的 gimbal2camera 结构：
+    *   gimbal2camera.xyz / gimbal2camera.rpy（展示为 roll/pitch/yaw），
+    *   外加 rpy 旋转范围与标定数量的注释块。
+    *
+    * @param xyz_m           gimbal2camera 平移 (m, 3x1)
+    * @param rpy             gimbal2camera 偏角 (degree, yaw/pitch/roll 序)
+    * @param board_distance  标定板到世界原点的水平距离 (m)
+    * @param board_ypr       标定板同竖直摆放时的偏角 (degree, yaw/pitch/roll)
     * @param handeye_rpy_range 参与标定的下位机 RPY 姿态角范围
-    * @param filename 输出的YAML文件路径
+    * @param filename        输出的 YAML 文件路径
     */
     void saveHandEyeCalibrationYAML(
-        const cv::Mat& R_camera2gimbal,
-        const cv::Mat& t_camera2gimbal,
+        const cv::Mat& xyz_m,
         const Eigen::Vector3d& rpy,
+        double board_distance,
+        const Eigen::Vector3d& board_ypr,
         const RpyRange& handeye_rpy_range,
         const std::string& filename
     );
