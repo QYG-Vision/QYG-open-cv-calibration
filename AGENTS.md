@@ -5,13 +5,17 @@ Companion to `CLAUDE.md` (read that first for full architecture). This file cove
 ## Commands
 
 ```bash
-cmake -S . -B build && cmake --build build -j
+cmake -S . -B build
+cmake --build build -j
 ```
+
+Default configure does **not** build tests. `BUILD_TESTING` defaults to `OFF`.
 
 Build with tests enabled:
 
 ```bash
-cmake -S . -B build -DBUILD_TESTING=ON && cmake --build build -j
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
@@ -21,6 +25,16 @@ No lint target in CMake. Format/tidy manually:
 clang-format -i <file>
 clang-tidy -p build <file>
 ```
+
+## Doxygen
+
+Public APIs in `include/` should carry Doxygen comments. Match the existing project style:
+
+- Prefer `///` on declarations in headers.
+- Use `/** ... */` for file-level blocks and larger entry-point comments in `.cpp` files.
+- Start with `@brief`; add `@details` only when behavior or constraints are not obvious.
+- Document parameters with `@param`, outputs with `@param[out]` when useful, and results with `@return`.
+- Keep comments factual and implementation-adjacent; update Doxygen when signatures or behavior change.
 
 ## Architecture
 
