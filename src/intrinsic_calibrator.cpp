@@ -4,9 +4,11 @@
 #include <cmath>
 #include <filesystem>
 #include <fmt/core.h>
+#include <iomanip>
 #include <iostream>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core/mat.hpp>
+#include <sstream>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -170,8 +172,22 @@ bool IntrinsicCalibrator::calibrate_camera() {
     auto error = error_sum / total_points;
     std::cout << "Reprojection error: " << error << std::endl;
 
-    std::cout << "Camera Matrix: \n" << camera_matrix << std::endl;
-    std::cout << "Distortion Coefficients: \n" << distort_coeffs << std::endl;
+    {
+        auto mat_to_yaml_flow = [](const cv::Mat& m) {
+            std::ostringstream oss;
+            oss << "[";
+            cv::Mat flat = m.reshape(1, 1);
+            const double* data = flat.ptr<double>(0);
+            for (int i = 0; i < flat.cols; ++i) {
+                if (i > 0) oss << ", ";
+                oss << data[i];
+            }
+            oss << "]";
+            return oss.str();
+        };
+        std::cout << "camera_matrix: " << mat_to_yaml_flow(camera_matrix) << std::endl;
+        std::cout << "distort_coeffs: " << mat_to_yaml_flow(distort_coeffs) << std::endl;
+    }
     std::cout << "Calibration Done !!! " << std::endl;
 
     tm.stop();
