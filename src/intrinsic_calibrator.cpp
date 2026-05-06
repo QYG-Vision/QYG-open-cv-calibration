@@ -40,86 +40,39 @@ IntrinsicCalibrator::IntrinsicCalibrator(
 }
 
 bool IntrinsicCalibrator::collect_camera(Mat& img, bool enable_collect) {
-    img_size_ = img.size();
-
-    std::vector<Point2f> pixel_points;
-    const bool found = find_Chessboard(paramer_, img, pixel_points);
-
-    vector<Point3f> object_points;
-    auto img_back = img.clone();
-
+    auto analysis = analyze_frame(img);
     const bool auto_enabled = auto_collector_ && auto_collector_->enabled();
+    const auto raw_img = img.clone();
 
-    AutoCollector::Params params {};
-    bool params_ok = false;
-    bool sharp_enough = true;
-    double sharpness_value = 0.0;
-
-    if (found) {
-        object_points = calcChessboardCorners(paramer_);
-        object_points[paramer_.boardSize.width - 1].x =
-            object_points[0].x + paramer_.grid_width;
-
-        params_ok = auto_collector_
-            ? auto_collector_->compute_params(pixel_points, img_size_, params)
-            : false;
-
-        if (auto_collect_sharpness_threshold_ > 0.0) {
-            sharpness_value = compute_sharpness(img, pixel_points);
-            sharp_enough = sharpness_value >= auto_collect_sharpness_threshold_;
-        }
-
-        if (auto_enabled && params_ok && sharp_enough && !enable_collect) {
-            if (auto_collector_->is_good_sample(params, pixel_points, last_frame_corners_)) {
+    if (analysis.found) {
+        if (auto_enabled && analysis.params_ok && analysis.sharp_enough && !enable_collect) {
+            if (auto_collector_->is_good_sample(
+                    analysis.params, analysis.pixel_points, last_frame_corners_))
+            {
                 enable_collect = true;
             }
         }
 
-        if (enable_collect && !sharp_enough) {
-            enable_collect = false;
-            std::cout << "[警告] 图像过于模糊 (sharpness=" << std::fixed
-                      << std::setprecision(1) << sharpness_value << " < "
-                      << auto_collect_sharpness_threshold_
-                      << ")，跳过采集（高曝光拖影？）" << std::endl;
-        }
-
-        if (auto_collect_sharpness_threshold_ > 0.0) {
-            const cv::Scalar sharp_color = sharp_enough ? cv::Scalar(0, 255, 0)
-                                                        : cv::Scalar(0, 60, 255);
-            cv::putText(
-                img, fmt::format("Sharp: {:.0f}", sharpness_value), { 10, 65 },
-                cv::FONT_HERSHEY_SIMPLEX, 0.8, sharp_color, 2
-            );
-        }
-
         if (enable_collect) {
-            this->obj_points_.push_back(object_points);
-            this->img_points_.push_back(pixel_points);
-            this->collected_count_++;
-            save_camera_image(img_back, this->collected_count_);
-            if (auto_collector_ && params_ok) {
-                auto_collector_->add_sample(params);
-            }
+            collect_analyzed_frame(raw_img, analysis, analysis.params_ok);
         }
     }
 
-    if (auto_enabled) {
-        auto_collector_->draw_progress(img, params_ok ? &params : nullptr);
-    }
-
-    last_frame_corners_ = found ? pixel_points : std::vector<cv::Point2f> {};
-
-    drawChessboardCorners(img, this->paramer_.boardSize, Mat(pixel_points), found);
-
-    std::string text = "Collected: " + std::to_string(this->collected_count_);
-    if (auto_enabled) {
-        text += "  [AUTO]";
-    }
-    cv::putText(
-        img, text, { 10, 30 }, cv::FONT_HERSHEY_SIMPLEX, 1, { 0, 255, 0 }, 2
-    );
+    last_frame_corners_ = analysis.found ? analysis.pixel_points : std::vector<cv::Point2f> {};
+    draw_frame_overlay(img, analysis, auto_enabled, auto_enabled);
 
     return true;
+}
+
+bool IntrinsicCalibrator::preview_camera(Mat& img) {
+    auto analysis = analyze_frame(img);
+    draw_frame_overlay(img, analysis, false, false);
+    return analysis.found;
+}
+
+bool IntrinsicCalibrator::confirm_collect_camera(const cv::Mat& img) {
+    auto analysis = analyze_frame(img);
+    return collect_analyzed_frame(img, analysis, false);
 }
 
 bool IntrinsicCalibrator::calibrate_camera() {
@@ -213,6 +166,99 @@ void IntrinsicCalibrator::set_auto_collect(bool enable) {
 
 bool IntrinsicCalibrator::is_auto_collect_enabled() const {
     return auto_collector_ && auto_collector_->enabled();
+}
+
+IntrinsicCalibrator::FrameAnalysis IntrinsicCalibrator::analyze_frame(const cv::Mat& img) {
+    FrameAnalysis analysis;
+    img_size_ = img.size();
+    analysis.found = find_Chessboard(paramer_, img, analysis.pixel_points);
+
+    if (!analysis.found) {
+        return analysis;
+    }
+
+    analysis.object_points = calcChessboardCorners(paramer_);
+    analysis.object_points[paramer_.boardSize.width - 1].x =
+        analysis.object_points[0].x + paramer_.grid_width;
+
+    analysis.params_ok = auto_collector_
+        ? auto_collector_->compute_params(analysis.pixel_points, img_size_, analysis.params)
+        : false;
+
+    if (auto_collect_sharpness_threshold_ > 0.0) {
+        analysis.sharpness_value = compute_sharpness(img, analysis.pixel_points);
+        analysis.sharp_enough = analysis.sharpness_value >= auto_collect_sharpness_threshold_;
+    }
+
+    return analysis;
+}
+
+void IntrinsicCalibrator::draw_frame_overlay(
+    cv::Mat& img,
+    const FrameAnalysis& analysis,
+    bool show_auto_progress,
+    bool auto_enabled
+) {
+    if (analysis.found && auto_collect_sharpness_threshold_ > 0.0) {
+        const cv::Scalar sharp_color = analysis.sharp_enough ? cv::Scalar(0, 255, 0)
+                                                             : cv::Scalar(0, 60, 255);
+        cv::putText(
+            img,
+            fmt::format("Sharp: {:.0f}", analysis.sharpness_value),
+            { 10, 65 },
+            cv::FONT_HERSHEY_SIMPLEX,
+            0.8,
+            sharp_color,
+            2
+        );
+    }
+
+    if (show_auto_progress && auto_enabled && auto_collector_) {
+        auto_collector_->draw_progress(img, analysis.params_ok ? &analysis.params : nullptr);
+    }
+
+    drawChessboardCorners(
+        img,
+        this->paramer_.boardSize,
+        Mat(analysis.pixel_points),
+        analysis.found
+    );
+
+    std::string text = "Collected: " + std::to_string(this->collected_count_);
+    if (auto_enabled) {
+        text += "  [AUTO]";
+    }
+    cv::putText(
+        img, text, { 10, 30 }, cv::FONT_HERSHEY_SIMPLEX, 1, { 0, 255, 0 }, 2
+    );
+}
+
+bool IntrinsicCalibrator::collect_analyzed_frame(
+    const cv::Mat& img,
+    const FrameAnalysis& analysis,
+    bool add_auto_sample
+) {
+    if (!analysis.found) {
+        return false;
+    }
+
+    if (!analysis.sharp_enough) {
+        std::cout << "[警告] 图像过于模糊 (sharpness=" << std::fixed
+                  << std::setprecision(1) << analysis.sharpness_value << " < "
+                  << auto_collect_sharpness_threshold_
+                  << ")，跳过采集（高曝光拖影？）" << std::endl;
+        return false;
+    }
+
+    obj_points_.push_back(analysis.object_points);
+    img_points_.push_back(analysis.pixel_points);
+    this->collected_count_++;
+    save_camera_image(img, this->collected_count_);
+    if (auto_collector_ && add_auto_sample && analysis.params_ok) {
+        auto_collector_->add_sample(analysis.params);
+    }
+
+    return true;
 }
 
 void IntrinsicCalibrator::save_camera_image(const cv::Mat& img, int index) {

@@ -381,6 +381,16 @@ public:
     /// @return 始终返回 true
     bool collect_camera(Mat& img, bool enable_collect = false);
 
+    /// @brief 仅预览当前帧的标定板识别结果，不写入采集样本
+    /// @param img 输入/输出图像
+    /// @return true 表示检测到标定板
+    bool preview_camera(Mat& img);
+
+    /// @brief 手动确认收集当前帧到标定样本
+    /// @param img 原始图像
+    /// @return true 表示当前帧成功收集
+    bool confirm_collect_camera(const Mat& img);
+
     /// @brief 对已采集的数据执行相机标定
     /// @return true 标定成功
     bool calibrate_camera();
@@ -391,6 +401,9 @@ public:
 
     /// @brief 查询自动采集是否启用
     bool is_auto_collect_enabled() const;
+
+    /// @brief 当前已收集的相机标定样本数
+    int collected_camera_count() const;
 
     // ---- 外参 (手眼) 标定 ----
 

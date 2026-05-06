@@ -44,6 +44,16 @@ public:
     /// @return 始终返回 true
     bool collect_camera(cv::Mat& img, bool enable_collect = false);
 
+    /// @brief 仅预览当前帧的标定板识别结果，不写入采集样本
+    /// @param img 输入/输出图像
+    /// @return true 表示检测到标定板
+    bool preview_camera(cv::Mat& img);
+
+    /// @brief 手动确认收集当前帧到标定样本
+    /// @param img 原始图像 (BGR)
+    /// @return true 表示当前帧成功收集
+    bool confirm_collect_camera(const cv::Mat& img);
+
     /// @brief 对已收集的内参数据执行 camera calibration
     /// @details 调用 cv::calibrateCamera，输出重投影误差，保存 camera_calibration.yaml，
     ///          完成后清空数据缓冲区。
@@ -57,6 +67,9 @@ public:
     /// @brief 查询当前自动采集是否启用
     bool is_auto_collect_enabled() const;
 
+    /// @brief 当前已收集的相机标定样本数
+    int collected_count() const { return collected_count_; }
+
     /// @brief 获取标定板参数引用 (供同级组件读取)
     const Paramer& paramer_ref() const { return paramer_; }
 
@@ -67,6 +80,16 @@ public:
     const cv::Mat& distort_coeffs() const { return distort_coeffs_; }
 
 private:
+    struct FrameAnalysis {
+        bool found = false;
+        std::vector<cv::Point2f> pixel_points;
+        std::vector<cv::Point3f> object_points;
+        AutoCollector::Params params {};
+        bool params_ok = false;
+        bool sharp_enough = true;
+        double sharpness_value = 0.0;
+    };
+
     const Paramer& paramer_;
     cv::Matx33d    camera_matrix_;
     cv::Mat        distort_coeffs_;
@@ -85,6 +108,15 @@ private:
     std::vector<cv::Point2f> last_frame_corners_;
     /// 清晰度门控阈值 (<= 0 关闭)
     double auto_collect_sharpness_threshold_ = 0.0;
+
+    FrameAnalysis analyze_frame(const cv::Mat& img);
+    void draw_frame_overlay(cv::Mat& img,
+                            const FrameAnalysis& analysis,
+                            bool show_auto_progress,
+                            bool auto_enabled);
+    bool collect_analyzed_frame(const cv::Mat& img,
+                                const FrameAnalysis& analysis,
+                                bool add_auto_sample);
 
     /// @brief 将当前帧保存为 JPEG 到 camera_calib_save_path
     void save_camera_image(const cv::Mat& img, int index);

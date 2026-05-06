@@ -122,6 +122,20 @@ if(BUILD_TESTING)
     )
     gtest_discover_tests(test_image_reader)
 
+    # IntrinsicCalibrator
+    add_executable(test_intrinsic_calibrator tests/unit/test_intrinsic_calibrator.cpp)
+    target_include_directories(test_intrinsic_calibrator PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_compile_definitions(test_intrinsic_calibrator
+        PRIVATE
+            TEST_DATA_DIR="${TEST_DATA_DIR}"
+    )
+    target_link_libraries(test_intrinsic_calibrator
+        PRIVATE
+            gtest_main
+            calibration_core
+    )
+    gtest_discover_tests(test_intrinsic_calibrator)
+
     # ----- 离线集成测试：手眼标定黑盒验证 -----
     add_executable(test_handeye_offline tests/integration/test_handeye_offline.cpp)
     target_include_directories(test_handeye_offline PRIVATE ${PROJECT_SOURCE_DIR}/include)

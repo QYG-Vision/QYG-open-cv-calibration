@@ -92,6 +92,14 @@ bool Calibrate::collect_camera(Mat& img, bool enable_collect) {
     return intrinsic_->collect_camera(img, enable_collect);
 }
 
+bool Calibrate::preview_camera(Mat& img) {
+    return intrinsic_->preview_camera(img);
+}
+
+bool Calibrate::confirm_collect_camera(const Mat& img) {
+    return intrinsic_->confirm_collect_camera(img);
+}
+
 void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool enable_collect) {
     extrinsic_->collect_handeye(img, q, enable_collect);
 }
@@ -138,6 +146,10 @@ void Calibrate::set_auto_collect(bool enable) {
 
 bool Calibrate::is_auto_collect_enabled() const {
     return intrinsic_->is_auto_collect_enabled();
+}
+
+int Calibrate::collected_camera_count() const {
+    return intrinsic_->collected_count();
 }
 
 } // namespace qd::calibrate
