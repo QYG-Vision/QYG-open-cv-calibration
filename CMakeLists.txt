@@ -73,9 +73,9 @@ target_link_libraries(calibration_core
 # ============================================================
 # 测试体系
 # ============================================================
-include(CTest)
-
 option(BUILD_TESTING "Build unit and integration tests" OFF)
+
+include(CTest)
 
 if(BUILD_TESTING)
     # ----- GoogleTest via FetchContent -----
@@ -89,8 +89,6 @@ if(BUILD_TESTING)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
     include(GoogleTest)
-
-    enable_testing()
 
     # ----- 测试数据根目录 -----
     set(TEST_DATA_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/data)
