@@ -30,27 +30,17 @@ namespace qd::calibrate {
 using namespace cv;
 using namespace std;
 
-// 参数类
-/**
- * @brief 标定板类型
- */
+// ============================================================
+// 1. 共享类型
+// ============================================================
+
 enum Pattern { CHESSBOARD, CIRCLES_GRID, ASYMMETRIC_CIRCLES_GRID };
-/**
- * @brief 标定流程状态
- */
 enum Mode { Calibrating, Calibrated, Undistorting };
-/**
- * @brief 标定参数读取与解析
- */
+
 struct Paramer {
-    /**
-     * @brief 从配置文件读取标定板参数
-     * @param config_path YAML 配置文件路径
-     */
     Paramer(const std::string& config_path) {
         auto yaml = YAML::LoadFile(config_path);
 
-        // 判断标定板类型
         auto val = yaml["pattern"].as<std::string>();
         if (val == "circles")
             pattern = CIRCLES_GRID;
@@ -59,7 +49,6 @@ struct Paramer {
         else if (val == "chessboard")
             pattern = CHESSBOARD;
 
-        // 标定板尺寸
         boardSize.height = yaml["pattern_rows"].as<int>();
         boardSize.width = yaml["pattern_cols"].as<int>();
 
@@ -67,284 +56,22 @@ struct Paramer {
         grid_width = squareSize * (boardSize.width - 1);
     }
 
-    Pattern pattern; // 标定板类型
-    cv::Size boardSize; // 标定板内角点个数
-    float squareSize; // 标定板方格边长
-    float grid_width; // 标定板宽度
+    Pattern   pattern;
+    cv::Size  boardSize;
+    float     squareSize;
+    float     grid_width;
 };
 
-/**
- * @brief 相机标定与手眼标定流程
- */
-class Calibrate {
-public:
-    Calibrate(const std::string& config_path);
-
-    /**
-     * @brief 收集相机标定数据
-     * 
-     * @param img 原始图像
-     * @param enable_collect 是否收集数据 
-     * @return true 
-     * @return false 
-     */
-    bool collect_camera(Mat& img, bool enable_collect = false);
-
-    /**
-    @brief 收集手眼标定数据
-    @param enable_collect 是否收集数据
-    */
-    void collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool enable_collect = false);
-
-    /**
-    @brief 对采集到的数据进行相机标定
-    */
-    bool calibrate_camera();
-    /**
-    @brief 对收集到的数据进行手眼标定
-    */
-    void calibrate_handeye();
-
-    /**
-    @brief 可视化输入的云台欧拉角
-    */
-    bool display_rpy(cv::Mat& img, const Eigen::Quaterniond& q);
-
-    /**
-    * @brief 显示重投影误差
-    * @param img 输入图像
-    */
-    void display_error(cv::Mat& img);
-
-    /**
-    * @brief 显示已采集的标定板位置，用于手眼标定确认收集情况
-    * 
-    * @param img 
-    */
-    void show_collected_corners(cv::Mat& img);
-
-    // 手眼标定验证相关方法
-    /**
-    * @brief 从YAML文件加载手眼标定结果
-    * @param handeye_yaml_path 手眼标定结果YAML文件路径
-    * @return 是否成功加载
-    */
-    bool load_handeye_calibration(const std::string& handeye_yaml_path);
-    /**
-    * @brief 验证手眼标定准确性
-    * @param img 输入图像
-    * @param gimbal_quaternion 云台四元数（用于对比）
-    */
-    void validate_handeye(cv::Mat& img, const Eigen::Quaterniond& gimbal_quaternion);
-    /**
-    * @brief 重置验证统计信息
-    */
-    void reset_validation_stats(); // 重置验证统计信息
-
-
-    /**
-    * @brief 从文件夹加载手眼标定数据
-    * @param folder_path 数据文件夹路径
-    * @return 是否成功加载
-    */
-    bool load_handeye_data_from_folder(const std::string& folder_path); // 从文件夹加载手眼标定数据
-
-    /**
-     * @brief 切换自动采集模式（直接移植自 ROS camera_calibration）
-     * @param enable 是否启用
-     */
-    void set_auto_collect(bool enable);
-
-    /**
-     * @brief 查询当前自动采集状态
-     */
-    bool is_auto_collect_enabled() const;
-
-private:
-    struct RpyRange {
-        bool valid { false };
-        Eigen::Vector3d min_ypr_deg { Eigen::Vector3d::Zero() };
-        Eigen::Vector3d max_ypr_deg { Eigen::Vector3d::Zero() };
-    };
-
-    /**
-    @brief 获取标定板角点
-    */
-    bool collect_camera(
-        IN Mat& img,
-        OUT std::vector<Point2f>& pixel_points,
-        OUT vector<Point3f>& object_points
-    );
-
-    /**
-     * @brief 计算标定板感兴趣区域内的拉普拉斯方差，作为清晰度指标
-     *
-     * 该指标 ROS 原版没有，仅作为对运动模糊 / 高曝光拖影的额外保护，
-     * 默认开启。配置中 \c auto_collect_sharpness_threshold <= 0 时关闭。
-     *
-     * @param img        原始图像
-     * @param corners    检测到的角点
-     * @return 拉普拉斯方差，值越大越清晰
-     */
-    double compute_sharpness(
-        const cv::Mat& img, const std::vector<cv::Point2f>& corners
-    ) const;
-
-    /**
-    @brief 输入 2D 标定角点获得标定板坐标系点位
-    */
-    vector<Point3f> calcChessboardCorners(std::vector<cv::Point2f>& pixel_points);
-
-    /**
-    @brief 查找 2D 标定角点
-    */  
-    bool find_Chessboard(const cv::Mat& img, std::vector<cv::Point2f>& pixel_points);
-
-    /**
-        @brief 计算重投影误差
-        @param object_points 3D 物体点
-        @param pixel_points 2D 像素点
-        @return 重投影误差
-    */
-    double calculate_reprojection_error(
-        const std::vector<cv::Point2f>& pixel_points,
-        const std::vector<cv::Point2f>& projected_points
-    );
-
-    // 保存和加载标定数据
-    /**
-    * @brief 保存相机标定图片
-    * @param img 要保存的图像
-    * @param index 图片索引
-    */
-    void save_camera_image(const cv::Mat& img, int index); // 保存相机标定图片
-    /**
-    * @brief 保存手眼标定数据（图片和姿态信息）
-    * @param img 要保存的图像
-    * @param q 云台四元数
-    * @param index 数据索引
-    */
-    void save_handeye_data(
-        const cv::Mat& img,
-        const Eigen::Quaterniond& q,
-        int index
-    ); // 保存手眼标定数据（图片+姿态）
-
-    /**
-    * @brief 保存相机标定结果到 YAML 文件
-    *
-    * @param image_size 图像大小 (cv::Size(width, height))
-    * @param camera_matrix 相机内参矩阵 (3x3)
-    * @param dist_coeffs 畸变系数 (1xN，通常5个或8个)
-    * @param filename 输出的YAML文件路径
-    */
-    void saveCalibrationYAML(
-        const cv::Size& image_size,
-        const cv::Mat& camera_matrix,
-        const cv::Mat& dist_coeffs,
-        const std::string& filename
-    );
-    /**
-    @brief 输出手眼标定数据
-    */
-    void print_yaml(
-        const cv::Mat& R_camera2gimbal,
-        const cv::Mat& t_camera2gimbal,
-        const Eigen::Vector3d& rpy
-    );
-    /**
-    @brief 输出手眼标定数据（含标定板位姿信息）
-    */
-    void print_yaml(
-        const cv::Mat& t_camera2gimbal,
-        const Eigen::Vector3d& rpy,
-        double board_distance,
-        const Eigen::Vector3d& board_ypr,
-        const RpyRange& handeye_rpy_range
-    );
-    /**
-    * @brief 保存手眼标定结果到 YAML 文件（gimbal2camera 注释式格式）
-    *
-    * 输出与终端 print_yaml() 一致的 gimbal2camera 结构：
-    *   gimbal2camera.xyz / gimbal2camera.rpy（展示为 roll/pitch/yaw），
-    *   外加 rpy 旋转范围与标定数量的注释块。
-    *
-    * @param xyz_m           gimbal2camera 平移 (m, 3x1)
-    * @param rpy             gimbal2camera 偏角 (degree, yaw/pitch/roll 序)
-    * @param board_distance  标定板到世界原点的水平距离 (m)
-    * @param board_ypr       标定板同竖直摆放时的偏角 (degree, yaw/pitch/roll)
-    * @param handeye_rpy_range 参与标定的下位机 RPY 姿态角范围
-    * @param filename        输出的 YAML 文件路径
-    */
-    void saveHandEyeCalibrationYAML(
-        const cv::Mat& xyz_m,
-        const Eigen::Vector3d& rpy,
-        double board_distance,
-        const Eigen::Vector3d& board_ypr,
-        const RpyRange& handeye_rpy_range,
-        const std::string& filename
-    );
-
-    /**
-     * @brief 统计参与手眼标定的下位机 RPY 姿态角范围
-     */
-    RpyRange calculate_handeye_rpy_range() const;
-
-    /**
-     * @brief 计算标定板角点的最小距离
-     * 
-     * @param pixel_points 标定板角点
-     * @return std::pair<bool, double> bool：是否满足最小距离要求，double：最小距离像素px值
-     */
-    std::pair<bool, double> calculate_coners_min_distance(IN std::vector<Point2f>& pixel_points);
-
-public:
-    Paramer paramer;
-
-private:
-    Size img_size;
-
-    // 标定用数据
-    std::vector<std::vector<cv::Point3f>> obj_points;
-    std::vector<std::vector<cv::Point2f>> img_points;
-
-    // 参数
-    cv::Matx33d camera_matrix;
-    cv::Mat distort_coeffs;
-    int calibrateCamera_flags_ = cv::CALIB_FIX_K3;
-
-    std::vector<cv::Mat> rvecs, tvecs;
-    // 手眼标定用数据（calibrateRobotWorldHandEye 需要 world2gimbal）
-    std::vector<cv::Mat> R_world2gimbal_list, t_world2gimbal_list;
-    std::vector<Eigen::Vector3d> handeye_ypr_deg_list_;
-    // 手眼标定结果（用于验证）
-    cv::Mat R_camera2gimbal;
-    cv::Mat t_camera2gimbal;
-    bool handeye_loaded = false;
-    // 验证用历史数据（用于计算位置一致性）
-    std::vector<cv::Mat> world_positions_history; // 存储标定板在世界坐标系下的位置历史
-
-    cv::TickMeter tm; // 延迟计时器
-    int collected_count = 0; // 已采集的标定图像数量
-
-    // 数据保存路径
-    std::string camera_calib_save_path; // 相机标定图片保存路径
-    std::string handeye_calib_save_path; // 手眼标定数据保存路径
-
-    // ---- 自动采集（直接移植自 ROS image_pipeline/camera_calibration）----
-    /// 自动采集器：负责 ROS 风格的特征参数 / 去重 / 覆盖度统计 / UI 进度条
-    std::unique_ptr<AutoCollector> auto_collector_;
-    /// 上一帧角点缓存，供 AutoCollector 做静止性检查
-    std::vector<cv::Point2f> last_frame_corners_;
-    /// 拉普拉斯方差阈值（<= 0 时关闭清晰度检查）
-    double auto_collect_sharpness_threshold_ = 0.0;
+struct RpyRange {
+    bool          valid { false };
+    Eigen::Vector3d min_ypr_deg { Eigen::Vector3d::Zero() };
+    Eigen::Vector3d max_ypr_deg { Eigen::Vector3d::Zero() };
 };
 
-/**
- * @brief 归一化角度到 $(-\pi, \pi]$
- * @param angle 输入角度（弧度）
- * @return double 归一化后的角度
- */
+// ============================================================
+// 2. 共享自由函数 — 数学
+// ============================================================
+
 static double limit_rad(double angle) {
     while (angle > CV_PI)
         angle -= 2 * CV_PI;
@@ -353,15 +80,6 @@ static double limit_rad(double angle) {
     return angle;
 }
 
-/**
- * @brief 四元数转欧拉角
- * @param q 四元数
- * @param axis0 轴序0
- * @param axis1 轴序1
- * @param axis2 轴序2
- * @param extrinsic 是否为外旋
- * @return Eigen::Vector3d 欧拉角（弧度）
- */
 static Eigen::Vector3d
 eulers(Eigen::Quaterniond q, int axis0, int axis1, int axis2, bool extrinsic = false) {
     if (!extrinsic)
@@ -431,18 +149,263 @@ eulers(Eigen::Quaterniond q, int axis0, int axis1, int axis2, bool extrinsic = f
     return eulers;
 }
 
-/**
- * @brief 旋转矩阵转欧拉角
- * @param R 旋转矩阵
- * @param axis0 轴序0
- * @param axis1 轴序1
- * @param axis2 轴序2
- * @param extrinsic 是否为外旋
- * @return Eigen::Vector3d 欧拉角（弧度）
- */
 static Eigen::Vector3d eulers(Eigen::Matrix3d R, int axis0, int axis1, int axis2, bool extrinsic) {
     Eigen::Quaterniond q(R);
     return eulers(q, axis0, axis1, axis2, extrinsic);
 }
+
+// ============================================================
+// 3. 共享自由函数 — 棋盘检测与工具
+// ============================================================
+
+inline void draw_board_orientation(
+    cv::Mat& img, const std::vector<cv::Point2f>& pixel_points, const cv::Size& board_size
+) {
+    if (pixel_points.size() < 2) {
+        return;
+    }
+
+    const int board_point_count = board_size.width * board_size.height;
+    if (board_size.width < 2 || board_size.height < 2
+        || static_cast<int>(pixel_points.size()) < board_point_count)
+    {
+        return;
+    }
+
+    const cv::Point origin = pixel_points.front();
+    const cv::Point x_axis = pixel_points[1];
+    const cv::Point y_axis = pixel_points[board_size.width];
+    const cv::Point opposite = pixel_points[board_point_count - 1];
+
+    cv::circle(img, origin, 8, cv::Scalar(255, 255, 255), -1);
+    cv::circle(img, origin, 8, cv::Scalar(0, 0, 255), 2);
+    cv::arrowedLine(img, origin, x_axis, cv::Scalar(0, 0, 255), 3, cv::LINE_AA, 0, 0.2);
+    cv::arrowedLine(img, origin, y_axis, cv::Scalar(0, 255, 0), 3, cv::LINE_AA, 0, 0.2);
+    cv::circle(img, opposite, 6, cv::Scalar(255, 255, 0), 2);
+
+    cv::putText(
+        img, "O", origin + cv::Point(10, -10), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 255), 2
+    );
+    cv::putText(
+        img, "X+", x_axis + cv::Point(10, -10), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 0, 255), 2
+    );
+    cv::putText(
+        img, "Y+", y_axis + cv::Point(10, -10), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 0), 2
+    );
+    cv::putText(
+        img,
+        "Board Dir",
+        origin + cv::Point(10, 25),
+        cv::FONT_HERSHEY_SIMPLEX,
+        0.7,
+        cv::Scalar(255, 255, 0),
+        2
+    );
+}
+
+inline bool find_Chessboard(const Paramer& paramer, const cv::Mat& img,
+                            std::vector<cv::Point2f>& pixel_points) {
+    Mat img_gray;
+    cv::cvtColor(img, img_gray, COLOR_BGR2GRAY);
+    bool found = false;
+    switch (paramer.pattern) {
+        case CHESSBOARD:
+            found = findChessboardCornersSB(
+                img_gray,
+                paramer.boardSize,
+                pixel_points,
+                CALIB_CB_EXHAUSTIVE + cv::CALIB_CB_ACCURACY
+            );
+            break;
+        case CIRCLES_GRID:
+            found = findCirclesGrid(img_gray, paramer.boardSize, pixel_points);
+            break;
+        case ASYMMETRIC_CIRCLES_GRID:
+            found = findCirclesGrid(
+                img_gray,
+                paramer.boardSize,
+                pixel_points,
+                CALIB_CB_ASYMMETRIC_GRID
+            );
+            break;
+        default:
+            std::cerr << "Unknown pattern type\n";
+            break;
+    }
+    return found;
+}
+
+inline vector<Point3f> calcChessboardCorners(const Paramer& paramer) {
+    vector<Point3f> corners;
+
+    auto chessboar_type = paramer.pattern;
+    auto boardSize = paramer.boardSize;
+    auto squareSize = paramer.squareSize;
+    switch (chessboar_type) {
+        case CHESSBOARD:
+        case CIRCLES_GRID:
+            for (int i = 0; i < boardSize.height; i++)
+                for (int j = 0; j < boardSize.width; j++)
+                    corners.emplace_back(float(j * squareSize), float(i * squareSize), 0);
+            break;
+
+        case ASYMMETRIC_CIRCLES_GRID:
+            for (int i = 0; i < boardSize.height; i++)
+                for (int j = 0; j < boardSize.width; j++)
+                    corners.emplace_back(
+                        float((2 * j + i % 2) * squareSize),
+                        float(i * squareSize),
+                        0
+                    );
+            break;
+
+        default:
+            CV_Error(Error::StsBadArg, "Unknown pattern type\n");
+    }
+    return corners;
+}
+
+inline double compute_sharpness(
+    const cv::Mat& img, const std::vector<cv::Point2f>& corners
+) {
+    if (img.empty() || corners.empty()) {
+        return 0.0;
+    }
+
+    cv::Rect board_roi = cv::boundingRect(corners);
+    const int pad = static_cast<int>(
+        std::max(board_roi.width, board_roi.height) * 0.05
+    );
+    board_roi.x      = std::max(0, board_roi.x - pad);
+    board_roi.y      = std::max(0, board_roi.y - pad);
+    board_roi.width  = std::min(img.cols - board_roi.x, board_roi.width  + 2 * pad);
+    board_roi.height = std::min(img.rows - board_roi.y, board_roi.height + 2 * pad);
+    if (board_roi.width <= 0 || board_roi.height <= 0) {
+        return 0.0;
+    }
+
+    cv::Mat gray_roi;
+    if (img.channels() == 1) {
+        gray_roi = img(board_roi);
+    } else {
+        cv::cvtColor(img(board_roi), gray_roi, cv::COLOR_BGR2GRAY);
+    }
+    cv::Mat lap;
+    cv::Laplacian(gray_roi, lap, CV_64F);
+    cv::Scalar mean, stddev;
+    cv::meanStdDev(lap, mean, stddev);
+    return stddev[0] * stddev[0];
+}
+
+inline double calculate_reprojection_error(
+    const std::vector<cv::Point2f>& pixel_points,
+    const std::vector<cv::Point2f>& projected_points
+) {
+    double total_err = 0;
+    for (size_t i = 0; i < pixel_points.size(); i++) {
+        double err = cv::norm(pixel_points[i] - projected_points[i]);
+        total_err += err * err;
+    }
+    return std::sqrt(total_err / pixel_points.size());
+}
+
+inline std::pair<bool, double>
+calculate_coners_min_distance(const Paramer& paramer, IN std::vector<Point2f>& pixel_points) {
+    double min_dist = std::numeric_limits<double>::max();
+    double max_dist = 0.0;
+
+    int width = paramer.boardSize.width;
+    int height = paramer.boardSize.height;
+
+    for (int row = 0; row < height; ++row) {
+        for (int col = 0; col < width; ++col) {
+            int idx = row * width + col;
+            cv::Point2f pt_curr = pixel_points[idx];
+
+            if (col < width - 1) {
+                int idx_right = idx + 1;
+                cv::Point2f pt_right = pixel_points[idx_right];
+                double dist = cv::norm(pt_curr - pt_right);
+                if (dist < min_dist)
+                    min_dist = dist;
+                if (dist > max_dist)
+                    max_dist = dist;
+            }
+
+            if (row < height - 1) {
+                int idx_bottom = idx + width;
+                cv::Point2f pt_bottom = pixel_points[idx_bottom];
+                double dist = cv::norm(pt_curr - pt_bottom);
+                if (dist < min_dist)
+                    min_dist = dist;
+                if (dist > max_dist)
+                    max_dist = dist;
+            }
+        }
+    }
+
+    bool found = true;
+    if (min_dist < MINI_DISTANCE_PIX) {
+        found = false;
+        std::cout << "警告: 角点过于密集，可能导致检测精度下降。" << std::endl;
+    }
+
+    return { found, min_dist };
+}
+
+/// @brief 检测标定板并返回像素/空间点（原 private Calibrate::collect_camera 重载）
+inline bool detect_board(const Paramer& paramer, cv::Mat& img,
+                         std::vector<cv::Point2f>& pixel_points,
+                         std::vector<cv::Point3f>& object_points) {
+    bool found = find_Chessboard(paramer, img, pixel_points);
+
+    if (found) {
+        object_points = calcChessboardCorners(paramer);
+        return true;
+    }
+
+    return false;
+}
+
+// ============================================================
+// 4. 门面 Calibrate — 委托给三个内部类
+// ============================================================
+
+class IntrinsicCalibrator;
+class ExtrinsicCalibrator;
+class CalibrationValidation;
+
+class Calibrate {
+public:
+    Calibrate(const std::string& config_path);
+    ~Calibrate();
+
+    bool collect_camera(Mat& img, bool enable_collect = false);
+    void collect_handeye(Mat& img, const Eigen::Quaterniond& q, bool enable_collect = false);
+
+    bool calibrate_camera();
+    void calibrate_handeye();
+
+    bool display_rpy(cv::Mat& img, const Eigen::Quaterniond& q);
+    void display_error(cv::Mat& img);
+    void show_collected_corners(cv::Mat& img);
+
+    bool load_handeye_calibration(const std::string& handeye_yaml_path);
+    void validate_handeye(cv::Mat& img, const Eigen::Quaterniond& gimbal_quaternion);
+    void reset_validation_stats();
+
+    bool load_handeye_data_from_folder(const std::string& folder_path);
+
+    void set_auto_collect(bool enable);
+    bool is_auto_collect_enabled() const;
+
+public:
+    Paramer paramer;
+
+private:
+    std::unique_ptr<IntrinsicCalibrator>   intrinsic_;
+    std::unique_ptr<ExtrinsicCalibrator>   extrinsic_;
+    std::unique_ptr<CalibrationValidation> validation_;
+};
 
 } // namespace qd::calibrate
