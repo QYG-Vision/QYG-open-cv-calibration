@@ -38,10 +38,10 @@ Public APIs in `include/` should carry Doxygen comments. Match the existing proj
 
 ## Architecture
 
-Four thin `main` files at repo root (`calibrateCamera.cpp`, `calibrateHandEye.cpp`,
-`calculateError.cpp`, `validateHandEye.cpp`). Shared logic lives in `src/` + `include/`
-and compiles into the `calibration_core` static library. New shared code goes in `src/`,
-not in the `main` files.
+Four thin `main` files in `apps/` (`calibrateCamera.cpp`, `calibrateHandEye.cpp`,
+`calculateError.cpp`, `validateHandEye.cpp`) plus `previewCamera.cpp`. Shared logic lives
+in `src/` + `include/` and compiles into the `calibration_core` static library. New shared
+code goes in `src/`, new executables go in `apps/`.
 
 ## Device abstraction
 

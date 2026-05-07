@@ -26,11 +26,11 @@ target_include_directories(calibration_core
     ${CMAKE_CURRENT_SOURCE_DIR}/hikSDK/include
 )
 
-add_executable(calibrateCamera calibrateCamera.cpp)
-add_executable(calculateError calculateError.cpp)
-add_executable(calibrateHandEye calibrateHandEye.cpp)
-add_executable(validateHandEye validateHandEye.cpp)
-add_executable(previewCamera previewCamera.cpp)
+add_executable(calibrateCamera apps/calibrateCamera.cpp)
+add_executable(calculateError apps/calculateError.cpp)
+add_executable(calibrateHandEye apps/calibrateHandEye.cpp)
+add_executable(validateHandEye apps/validateHandEye.cpp)
+add_executable(previewCamera apps/previewCamera.cpp)
 
 # 链接公共库
 target_link_libraries(calibrateCamera PRIVATE calibration_core)

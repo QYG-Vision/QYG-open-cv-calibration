@@ -38,7 +38,7 @@ The four executables all live in `build/` and accept `--config-path=<yaml>` (def
 
 ## Architecture
 
-Each executable is a thin `main` (`calibrateCamera.cpp`, `calibrateHandEye.cpp`, `calculateError.cpp`, `validateHandEye.cpp`) at the repo root. All shared logic lives under `src/` + `include/` and is built once into the `calibration_core` static library, which every executable links. When adding shared functionality, put it in `src/` so all four binaries get it for free; only put loop/CLI glue in the top-level `*.cpp` files.
+Each executable is a thin `main` (`apps/calibrateCamera.cpp`, `apps/calibrateHandEye.cpp`, `apps/calculateError.cpp`, `apps/validateHandEye.cpp`, `apps/previewCamera.cpp`). All shared logic lives under `src/` + `include/` and is built once into the `calibration_core` static library, which every executable links. When adding shared functionality, put it in `src/` so all binaries get it for free; only put loop/CLI glue in `apps/`.
 
 **Device abstraction.** `qd::Device::Device` (`include/device.hpp`) is a pure virtual `read(img, timestamp)` interface. Three implementations: `Hik_Camera` (HIK SDK + background thread + `ThreadSafeQueue`), `UVC_Camera` (`cv::VideoCapture`), `Image_Reader` (offline directory; the only one that ever returns `is_exhausted() == true`). `qd::app::create_device(config_path)` (`src/device_factory.cpp`, declared in `include/device_factory.hpp`) is the single switch on the YAML `device:` field — add new sources here. The factory returns a `DeviceContext` struct containing the device ptr and a `wait_time` hint (0 for `IMG`, 1 for live cameras) used as the `WebViewer::waitKey` delay. When `device:` is `IMG` and all images are consumed, `calibrateCamera` auto-triggers `calibrate_camera()` and exits.
 
