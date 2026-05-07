@@ -64,7 +64,7 @@ static const char* HTML_PAGE = R"html(<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OpenCV WebViewer</title>
+<title>Camera Preview</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#1e1e2e;color:#cdd6f4;font-family:system-ui,-apple-system,sans-serif;
@@ -76,30 +76,31 @@ header .dot{width:10px;height:10px;border-radius:50%;background:#a6e3a1;
             display:inline-block;margin-right:8px}
 header .dot.off{background:#f38ba8}
 main{flex:1;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;
-     gap:20px;padding:20px;overflow:hidden;min-height:0}
+     gap:20px;padding:20px;overflow:auto;min-height:0}
 .card{background:#313244;border-radius:10px;overflow:hidden;
-      box-shadow:0 4px 16px rgba(0,0,0,.35);min-width:320px;max-width:90vw}
-.card .title{padding:10px 16px;background:#45475a;font-size:13px;font-weight:500;
+      box-shadow:0 4px 16px rgba(0,0,0,.35);min-width:360px;max-width:90vw}
+.card .title{padding:8px 16px;background:#45475a;font-size:13px;font-weight:500;
              letter-spacing:.3px;display:flex;align-items:center;gap:8px}
 .card .title .icon{opacity:.6}
-.card img{display:block;max-width:100%;max-height:calc(100vh - 140px);object-fit:contain;background:#11111b}
+.card .hud{display:flex;flex-wrap:wrap;gap:3px 14px;padding:5px 16px;
+           background:#1e1e2e;font-size:11px;color:#a6adc8;
+           border-bottom:1px solid #45475a}
+.card .hud .item{display:inline-flex;align-items:center;gap:2px;white-space:nowrap}
+.card .hud .label{color:#6c7086}
+.card .hud .value{color:#cdd6f4;font-weight:500}
+.card img{display:block;max-width:100%;max-height:calc(100vh - 200px);object-fit:contain;background:#11111b}
 .empty{color:#6c7086;font-size:15px;padding:40px;text-align:center}
 footer{background:#181825;padding:10px 24px;font-size:12px;color:#6c7086;
        border-top:1px solid #313244;display:flex;justify-content:space-between}
-.toast{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);
+.toast{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);z-index:100;
        background:#b4befe;color:#1e1e2e;padding:6px 18px;border-radius:20px;
        font-size:13px;font-weight:600;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.show{opacity:1}
-.help{position:fixed;top:60px;right:16px;background:rgba(49,50,68,.92);
-      padding:14px 18px;border-radius:10px;font-size:12px;line-height:2;
-      backdrop-filter:blur(8px);border:1px solid #45475a}
-.help b{color:#b4befe}
-.help kbd{background:#45475a;padding:1px 6px;border-radius:4px;font-family:monospace}
 </style>
 </head>
 <body tabindex="0">
 <header>
-  <h1><span class="dot" id="dot"></span>OpenCV WebViewer</h1>
+  <h1><span class="dot" id="dot"></span>Camera Preview</h1>
   <span id="hdr-info" style="font-size:12px;color:#6c7086"></span>
 </header>
 <main id="container">
@@ -107,15 +108,9 @@ footer{background:#181825;padding:10px 24px;font-size:12px;color:#6c7086;
 </main>
 <footer>
   <span id="status">初始化中...</span>
-  <span>点击页面后可使用键盘控制</span>
+  <span>按 <kbd style="background:#45475a;padding:1px 5px;border-radius:3px">ESC</kbd> 退出</span>
 </footer>
 <div class="toast" id="toast"></div>
-<div class="help">
-  <b>快捷键</b><br>
-  <kbd>S</kbd> 采集  <kbd>C</kbd> 标定<br>
-  <kbd>A</kbd> 自动采集  <kbd>R</kbd> 重置<br>
-  <kbd>ESC</kbd> 退出
-</div>
 <script>
 const known = new Map();
 let toastTimer = null;
@@ -126,6 +121,21 @@ function showToast(msg) {
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), 600);
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+
+function hudPlaceholder() {
+  return '<span class="item"><span class="label">设备</span> <span class="value">--</span></span>' +
+    '<span class="item"><span class="label">分辨率</span> <span class="value">--</span></span>' +
+    '<span class="item"><span class="label">采集</span> <span class="value">-- fps</span></span>' +
+    '<span class="item"><span class="label">发布</span> <span class="value">-- fps</span></span>' +
+    '<span class="item"><span class="label">帧龄</span> <span class="value">-- ms</span></span>' +
+    '<span class="item"><span class="label">空帧</span> <span class="value">0</span></span>' +
+    '<span class="item"><span class="label">总帧</span> <span class="value">0</span></span>' +
+    '<span class="item"><span class="label">运行</span> <span class="value">0s</span></span>';
 }
 
 document.body.addEventListener('keydown', e => {
@@ -159,8 +169,9 @@ async function poll() {
         card.id = 'w-' + name;
         const ts = Date.now();
         card.innerHTML =
-          '<div class="title"><span class="icon">&#9654;</span>' + name + '</div>' +
-          '<img src="/stream?window=' + encodeURIComponent(name) + '&t=' + ts + '" alt="' + name + '">';
+          '<div class="title"><span class="icon">&#9654;</span>' + escHtml(name) + '</div>' +
+          '<div class="hud" id="hud-' + name + '">' + hudPlaceholder() + '</div>' +
+          '<img src="/stream?window=' + encodeURIComponent(name) + '&t=' + ts + '" alt="' + escHtml(name) + '">';
         container.appendChild(card);
         known.set(name, card);
       }
@@ -179,8 +190,33 @@ async function poll() {
   }
 }
 
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const statuses = await r.json();
+    known.forEach((card, name) => {
+      const s = statuses[name];
+      const hud = document.getElementById('hud-' + name);
+      if (!hud) return;
+      if (s) {
+        hud.innerHTML =
+          '<span class="item"><span class="label">设备</span> <span class="value">' + escHtml(s.device_type) + '</span></span>' +
+          '<span class="item"><span class="label">分辨率</span> <span class="value">' + escHtml(s.resolution) + '</span></span>' +
+          '<span class="item"><span class="label">采集</span> <span class="value">' + (typeof s.capture_fps === 'number' ? s.capture_fps.toFixed(1) : '--') + ' fps</span></span>' +
+          '<span class="item"><span class="label">发布</span> <span class="value">' + (typeof s.publish_fps === 'number' ? s.publish_fps.toFixed(1) : '--') + ' fps</span></span>' +
+          '<span class="item"><span class="label">帧龄</span> <span class="value">' + s.frame_age_ms + ' ms</span></span>' +
+          '<span class="item"><span class="label">空帧</span> <span class="value">' + s.empty_frame_count + '</span></span>' +
+          '<span class="item"><span class="label">总帧</span> <span class="value">' + s.total_frames + '</span></span>' +
+          '<span class="item"><span class="label">运行</span> <span class="value">' + (typeof s.uptime_s === 'number' ? s.uptime_s.toFixed(0) : '0') + 's</span></span>';
+      }
+    });
+  } catch {}
+}
+
 setInterval(poll, 2000);
+setInterval(pollStatus, 500);
 poll();
+pollStatus();
 document.body.focus();
 </script>
 </body>
@@ -297,6 +333,12 @@ void WebViewer::destroyAllWindows() {
     windows_.clear();
 }
 
+void WebViewer::setWindowStatus(const std::string& winname,
+                                const WindowStatus& status) {
+    std::lock_guard<std::mutex> lock(status_mtx_);
+    status_map_[winname] = status;
+}
+
 // ---------------------------------------------------------------------------
 // server
 // ---------------------------------------------------------------------------
@@ -368,6 +410,8 @@ void WebViewer::handle_client(int fd) {
             send_mjpeg_stream(fd, query_param(path, "window"));
         } else if (base_path == "/api/windows") {
             send_window_list(fd);
+        } else if (base_path == "/api/status") {
+            send_status_json(fd);
         } else {
             send_response(fd, 404, "text/plain", "Not Found");
         }
@@ -447,6 +491,29 @@ void WebViewer::send_window_list(int fd) {
         first = false;
     }
     json << "]";
+    send_response(fd, 200, "application/json", json.str());
+}
+
+void WebViewer::send_status_json(int fd) {
+    std::lock_guard<std::mutex> lock(status_mtx_);
+    std::ostringstream          json;
+    json << "{";
+    bool first = true;
+    for (const auto& [name, s] : status_map_) {
+        if (!first) json << ",";
+        first = false;
+        json << "\"" << name << "\":{"
+             << "\"device_type\":\"" << s.device_type << "\","
+             << "\"resolution\":\"" << s.resolution << "\","
+             << "\"capture_fps\":" << s.capture_fps << ","
+             << "\"publish_fps\":" << s.publish_fps << ","
+             << "\"frame_age_ms\":" << s.frame_age_ms << ","
+             << "\"empty_frame_count\":" << s.empty_frame_count << ","
+             << "\"total_frames\":" << s.total_frames << ","
+             << "\"uptime_s\":" << s.uptime_s
+             << "}";
+    }
+    json << "}";
     send_response(fd, 200, "application/json", json.str());
 }
 

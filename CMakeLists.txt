@@ -30,13 +30,14 @@ add_executable(calibrateCamera calibrateCamera.cpp)
 add_executable(calculateError calculateError.cpp)
 add_executable(calibrateHandEye calibrateHandEye.cpp)
 add_executable(validateHandEye validateHandEye.cpp)
-
+add_executable(previewCamera previewCamera.cpp)
 
 # 链接公共库
 target_link_libraries(calibrateCamera PRIVATE calibration_core)
 target_link_libraries(calculateError PRIVATE calibration_core)
 target_link_libraries(calibrateHandEye PRIVATE calibration_core)
 target_link_libraries(validateHandEye PRIVATE calibration_core)
+target_link_libraries(previewCamera PRIVATE calibration_core)
 
 # 海康SDK
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")

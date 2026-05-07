@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <map>
 #include <mutex>
 #include <queue>
@@ -12,6 +13,20 @@
 #include <opencv2/core/mat.hpp>
 
 namespace qd {
+
+/**
+ * @brief 窗口运行时状态，供前端 HUD 面板展示
+ */
+struct WindowStatus {
+    std::string device_type;
+    std::string resolution;
+    double capture_fps = 0.0;
+    double publish_fps = 0.0;
+    int64_t frame_age_ms = 0;
+    uint64_t empty_frame_count = 0;
+    uint64_t total_frames = 0;
+    double uptime_s = 0.0;
+};
 
 /**
  * @brief 基于内嵌 HTTP 服务器的 Web 图像查看器
@@ -57,6 +72,9 @@ public:
     void destroyWindow(const std::string& winname);
     void destroyAllWindows();
 
+    /// @brief 设置窗口运行时状态，供前端 HUD 轮询展示
+    void setWindowStatus(const std::string& winname, const WindowStatus& status);
+
     int port() const { return port_; }
 
 private:
@@ -66,6 +84,7 @@ private:
     void send_html_page(int fd);
     void send_mjpeg_stream(int fd, const std::string& window);
     void send_window_list(int fd);
+    void send_status_json(int fd);
     void send_response(int fd, int code, const std::string& content_type,
                        const std::string& body);
 
@@ -86,6 +105,9 @@ private:
     std::queue<int> keys_;
     std::mutex key_mtx_;
     std::condition_variable key_cv_;
+
+    std::map<std::string, WindowStatus> status_map_;
+    std::mutex status_mtx_;
 
     std::set<int> active_fds_;
     std::mutex fds_mtx_;
