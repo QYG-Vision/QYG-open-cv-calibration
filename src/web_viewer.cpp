@@ -4,12 +4,15 @@
 #include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <ifaddrs.h>
 #include <iostream>
 #include <netinet/in.h>
 #include <opencv2/imgcodecs.hpp>
+#include <set>
 #include <sstream>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <vector>
 
 namespace qd {
 
@@ -226,6 +229,42 @@ document.body.focus();
 // WebViewer implementation
 // ---------------------------------------------------------------------------
 
+static bool is_private_ipv4(const struct sockaddr_in* addr) {
+    uint32_t net = ntohl(addr->sin_addr.s_addr);
+    uint8_t  b1  = (net >> 24) & 0xFF;
+    uint8_t  b2  = (net >> 16) & 0xFF;
+    if (b1 == 10) return true;
+    if (b1 == 172 && b2 >= 16 && b2 <= 31) return true;
+    if (b1 == 192 && b2 == 168) return true;
+    return false;
+}
+
+static std::vector<std::string> collect_access_urls(int port) {
+    std::set<std::string> ips;
+    ips.insert("127.0.0.1");
+
+    struct ifaddrs* ifa = nullptr;
+    if (getifaddrs(&ifa) == 0) {
+        for (struct ifaddrs* p = ifa; p != nullptr; p = p->ifa_next) {
+            if (!p->ifa_addr || p->ifa_addr->sa_family != AF_INET) continue;
+            auto* sin = reinterpret_cast<sockaddr_in*>(p->ifa_addr);
+            if (!is_private_ipv4(sin)) continue;
+            char buf[INET_ADDRSTRLEN];
+            if (inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf)))
+                ips.insert(buf);
+        }
+        freeifaddrs(ifa);
+    }
+
+    std::vector<std::string> urls;
+    urls.push_back("http://localhost:" + std::to_string(port));
+    urls.push_back("http://127.0.0.1:" + std::to_string(port));
+    for (const auto& ip : ips) {
+        urls.push_back("http://" + ip + ":" + std::to_string(port));
+    }
+    return urls;
+}
+
 WebViewer::WebViewer(int port, int jpeg_quality)
     : port_(port), jpeg_quality_(jpeg_quality) {
     server_fd_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -263,8 +302,10 @@ WebViewer::WebViewer(int port, int jpeg_quality)
     running_       = true;
     server_thread_ = std::thread(&WebViewer::server_loop, this);
 
-    std::cout << "[WebViewer] 服务已启动: http://localhost:" << port_
-              << std::endl;
+    auto urls = collect_access_urls(port_);
+    std::cout << "[WebViewer] 服务已启动，可通过以下地址访问:\n";
+    for (const auto& url : urls)
+        std::cout << "  " << url << "\n";
 }
 
 WebViewer::~WebViewer() {
