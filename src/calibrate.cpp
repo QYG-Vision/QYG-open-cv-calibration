@@ -105,7 +105,18 @@ void Calibrate::collect_handeye(Mat& img, const Eigen::Quaterniond& q, IN bool e
 }
 
 bool Calibrate::calibrate_camera() {
-    return intrinsic_->calibrate_camera();
+    bool ok = intrinsic_->calibrate_camera();
+    if (ok) {
+        sync_validation_intrinsics_from_calibration();
+    }
+    return ok;
+}
+
+void Calibrate::sync_validation_intrinsics_from_calibration() {
+    validation_->set_intrinsics(
+        intrinsic_->camera_matrix(),
+        intrinsic_->distort_coeffs().clone()
+    );
 }
 
 void Calibrate::calibrate_handeye() {

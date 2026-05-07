@@ -50,6 +50,9 @@ public:
     /// @brief 清除验证统计历史 (world_positions_history)
     void reset_validation_stats();
 
+    /// @brief 运行时更新内参与畸变系数（不落盘）
+    void set_intrinsics(cv::Matx33d camera_matrix, cv::Mat distort_coeffs);
+
 private:
     const Paramer& paramer_;
     cv::Matx33d    camera_matrix_;

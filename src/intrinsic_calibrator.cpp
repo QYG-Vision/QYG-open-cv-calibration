@@ -159,6 +159,9 @@ bool IntrinsicCalibrator::calibrate_camera() {
 
     saveCalibrationYAML(img_size_, camera_matrix, distort_coeffs, "camera_calibration.yaml");
 
+    camera_matrix_ = camera_matrix;
+    distort_coeffs_ = distort_coeffs.clone();
+
     obj_points_.clear();
     img_points_.clear();
     pending_manual_image_paths_.clear();

@@ -414,4 +414,9 @@ void CalibrationValidation::reset_validation_stats() {
     world_positions_history_.clear();
 }
 
+void CalibrationValidation::set_intrinsics(cv::Matx33d camera_matrix, cv::Mat distort_coeffs) {
+    camera_matrix_ = camera_matrix;
+    distort_coeffs_ = std::move(distort_coeffs);
+}
+
 } // namespace qd::calibrate

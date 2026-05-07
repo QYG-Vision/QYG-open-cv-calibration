@@ -130,6 +130,24 @@ int run_image_sequence_loop(
             }
         } else if (key == 'c') {
             if (calibrate_.calibrate_camera()) {
+                viewer.destroyWindow("相机标定");
+                viewer.namedWindow("重投影误差");
+
+                while (true) {
+                    cv::Mat err_img;
+                    std::chrono::steady_clock::time_point err_ts;
+                    device.read(err_img, err_ts);
+                    if (err_img.empty()) {
+                        if (device.is_exhausted()) break;
+                        continue;
+                    }
+                    calibrate_.display_error(err_img);
+                    stats.tickPublish(err_img.cols, err_img.rows);
+                    viewer.imshow("重投影误差", err_img);
+                    viewer.setWindowStatus("重投影误差", stats.snapshot(device_type));
+                    int k = viewer.waitKey(50);
+                    if (k == 27) break;
+                }
                 viewer.destroyAllWindows();
                 return 0;
             }
@@ -186,6 +204,7 @@ int main(int argc, char* argv[]) {
 
     qd::FrameStats stats;
 
+    bool calibration_done = false;
     std::chrono::steady_clock::time_point timestamp;
     while (true) {
         Mat img;
@@ -194,37 +213,53 @@ int main(int argc, char* argv[]) {
 
         if (img.empty()) {
             if (device->is_exhausted()) {
-                std::cout << "离线图像已读取完毕，开始执行标定。" << std::endl;
-                cv::destroyAllWindows();
-                return calibrate_.calibrate_camera() ? 0 : 1;
+                if (!calibration_done) {
+                    std::cout << "离线图像已读取完毕，开始执行标定。" << std::endl;
+                    viewer.destroyAllWindows();
+                    return calibrate_.calibrate_camera() ? 0 : 1;
+                }
+                break;
             }
 
             cout << "image is empty" << endl;
             continue;
         }
 
-        // int key = waitKey(wait_time);
         int key = viewer.waitKey(wait_time);
-        if (key == 'c') {
-            if (calibrate_.calibrate_camera()) {
-                viewer.destroyAllWindows();
+
+        if (calibration_done) {
+            if (key == 27) break;
+        } else {
+            if (key == 'c') {
+                if (calibrate_.calibrate_camera()) {
+                    calibration_done = true;
+                    viewer.destroyWindow("相机标定");
+                    viewer.namedWindow("重投影误差");
+                } else {
+                    std::cout << "请继续采集有效的标定图像后再次按 'c'。" << std::endl;
+                }
+            } else if (key == 'a') {
+                calibrate_.set_auto_collect(!calibrate_.is_auto_collect_enabled());
+            } else if (key == 27) {
                 break;
-            } else {
-                std::cout << "请继续采集有效的标定图像后再次按 'c'。" << std::endl;
             }
-        } else if (key == 'a') {
-            calibrate_.set_auto_collect(!calibrate_.is_auto_collect_enabled());
-        } else if (key == 27) {
-            break;
+
+            if (!calibration_done) {
+                calibrate_.collect_camera(img, key == 's');
+            }
         }
 
-        calibrate_.collect_camera(img, key == 's');
+        if (calibration_done) {
+            calibrate_.display_error(img);
+        }
 
         stats.tickPublish(img.cols, img.rows);
-        viewer.imshow("相机标定", img);
-        viewer.setWindowStatus("相机标定", stats.snapshot(device_type));
+        const char* window_name = calibration_done ? "重投影误差" : "相机标定";
+        viewer.imshow(window_name, img);
+        viewer.setWindowStatus(window_name, stats.snapshot(device_type));
     }
 
+    viewer.destroyAllWindows();
     device.reset();
     std::cout << "标定完成，程序退出" << std::endl;
     return 0;

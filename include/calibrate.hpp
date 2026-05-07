@@ -453,6 +453,10 @@ public:
     /// @brief 清除验证统计历史
     void reset_validation_stats();
 
+    /// @brief 将 IntrinsicCalibrator 持有的最新内参同步到 CalibrationValidation
+    /// @details 在 calibrate_camera() 成功后自动调用，使 display_error() 使用刚标定的参数
+    void sync_validation_intrinsics_from_calibration();
+
 public:
     Paramer paramer;  ///< 标定板配置参数
 
