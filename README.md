@@ -1,212 +1,208 @@
-# OpenCV Calibration 使用教程
+# OpenCV Calibration — 相机与手眼标定工具集
 
-基于 OpenCV + yaml-cpp 的标定工具，支持三种输入源：
+基于 OpenCV + yaml-cpp 的标定工具集，覆盖相机内参标定、手眼标定、重投影误差查看和结果验证。支持 HIK 海康工业相机、UVC USB 相机和离线图片目录三种输入源，交互界面为内嵌 Web 服务（浏览器显示），不依赖 OpenCV HighGUI。
 
-- `HIK`：海康工业相机
-- `UVC`：USB 相机（`/dev/video*`）
-- `IMG`：离线图片目录
+## 核心能力与典型流程
 
-项目提供 4 个可执行程序：
+| 可执行程序 | 用途 |
+|---|---|
+| `calibrateCamera` | 相机内参标定（采集标定板图像 → 计算内参/畸变 → 输出 `camera_calibration.yaml`） |
+| `calibrateHandEye` | 手眼标定（采集图像 + 云台姿态 → PnP → 求解 gimbal2camera → 输出 `handeye_calibration.yaml`） |
+| `calculateError` | 实时查看重投影误差 RMSE(px)，评估当前内参的实际效果 |
+| `validateHandEye` | 固定标定板、转动云台，通过位置一致性验证手眼标定结果 |
+| `previewCamera` | 纯预览，不做任何标定处理 |
 
-- `calibrateCamera`：相机内参标定
-- `calibrateHandEye`：手眼标定
-- `calculateError`：查看实时重投影误差
-- `validateHandEye`：手眼标定结果验证
+**推荐完整流程**：修改配置 → `calibrateCamera` 得到 `camera_calibration.yaml` → 将内参/畸变回写到 `config/calibration.yaml` → `calibrateHandEye` 采集并计算 → `validateHandEye` 验证。
 
----
+## 代码结构总览
 
-## 1. 环境依赖
+```
+.
+├── apps/                   # 5 个薄入口（main），只处理 CLI 和主循环
+│   ├── calibrateCamera.cpp
+│   ├── calibrateHandEye.cpp
+│   ├── calculateError.cpp
+│   ├── validateHandEye.cpp
+│   └── previewCamera.cpp
+├── src/                    # 所有共享逻辑（编译为 calibration_core 静态库）
+│   ├── calibrate.cpp           # Calibrate 门面
+│   ├── intrinsic_calibrator.cpp # 内参标定
+│   ├── extrinsic_calibrator.cpp # 外参（手眼）标定
+│   ├── calibration_validation.cpp # 验证与重投影误差
+│   ├── auto_collector.cpp      # ROS 风格自动采集器
+│   ├── device_factory.cpp      # 根据 YAML 的 device: 字段创建输入源
+│   ├── hik_camera.cpp          # HIK 海康相机（后台线程 + 线程安全队列）
+│   ├── uvc_camera.cpp          # UVC USB 相机（cv::VideoCapture）
+│   ├── image_reader.cpp        # 离线图片读取
+│   ├── serial_driver.cpp       # 串口 IMU 姿态数据读取
+│   ├── uart_transporter.cpp    # UART 底层传输
+│   └── web_viewer.cpp          # 嵌入式 HTTP/MJPEG 服务器
+├── include/                # 公共头文件（与 src/ 一一对应）
+├── config/
+│   └── calibration.yaml    # 所有可执行程序共享的运行时配置
+├── hikSDK/                 # 海康 SDK 头文件与库文件（非业务核心）
+├── tests/
+│   ├── unit/               # 库级单元测试（ThreadSafeQueue、AutoCollector、ImageReader、IntrinsicCalibrator）
+│   └── integration/        # CLI 黑盒集成测试（手眼离线标定流程）
+└── CMakeLists.txt          # C++17，CMake 3.14+，所有 target 在此定义
+```
 
-Ubuntu/Debian：
+**阅读顺序建议**：先看 `apps/calibrateCamera.cpp` 理解完整主循环，再看 `include/calibrate.hpp` 了解门面 API，然后按兴趣深入 `intrinsic_calibrator.*`、`extrinsic_calibrator.*`、`device_factory.cpp`。
+
+## 运行时数据流
+
+每个可执行程序的运行链路高度一致：
+
+1. **解析参数** → `cv::CommandLineParser` 解析 `--config-path` 等参数
+2. **创建设备** → `qd::app::create_device(config_path)` 读取 YAML 中 `device:` 字段，构造对应的设备实例（返回 `DeviceContext`，含 `wait_time` 提示）
+3. **构造标定门面** → `qd::calibrate::Calibrate(config_path)` 内部创建 `IntrinsicCalibrator` / `ExtrinsicCalibrator` / `CalibrationValidation` 三个委托对象
+4. **初始化 WebViewer** → `qd::WebViewer(8080)` 启动嵌入式 HTTP 服务
+5. **主循环** → `device->read(img, timestamp)` 获取帧 → `viewer.imshow()` 推送到浏览器 → `viewer.waitKey()` 接收按键 → 按键分发到标定门面的对应方法
+6. **标定计算** → 门面方法委托给三个内部类执行，结果写入 YAML
+
+```
+  config/calibration.yaml
+         │
+         ▼
+  qd::app::create_device()  ──► Device (Hik_Camera / UVC_Camera / Image_Reader)
+         │
+         ▼
+  主循环 (apps/*.cpp)
+         │
+         ├──► viewer.imshow() / viewer.waitKey()   (展示 + 输入)
+         │
+         └──► qd::calibrate::Calibrate  (门面)
+                │
+                ├──► IntrinsicCalibrator     (内参标定 + 自动采集)
+                ├──► ExtrinsicCalibrator      (手眼标定 + PnP)
+                └──► CalibrationValidation    (重投影误差 + 位置一致性验证)
+```
+
+## 关键模块说明
+
+### 设备层（Device）
+
+`qd::Device::Device`（`include/device.hpp`）是纯虚接口，定义了 `read(img, timestamp)` 和 `is_exhausted()`。三个实现：
+
+- **Hik_Camera** — 后台线程持续抓图 + `ThreadSafeQueue` 缓冲，`read()` 取最新帧，永不耗尽
+- **UVC_Camera** — 封装 `cv::VideoCapture`，`read()` 直接读取，永不耗尽
+- **Image_Reader** — 按序读取目录下图片，`is_exhausted()` 返回 `true` —— **唯一会耗尽的设备**
+
+工厂 `qd::app::create_device()`（`src/device_factory.cpp`）是添加新输入源时的唯一修改点。
+
+### 标定层（Calibrate）
+
+`qd::calibrate::Calibrate`（`include/calibrate.hpp`）是薄门面，三种能力由三个内部类分别承担：
+
+- **IntrinsicCalibrator** — 棋盘/圆点检测、ROS 风格自动采集（`auto_collector`）、`cv::calibrateCamera` 调用、结果 YAML 保存
+- **ExtrinsicCalibrator** — 手眼数据采集、PnP 求解 `board2camera`、离线文件夹加载、`cv::calibrateRobotWorldHandEye` 调用、`handeye_calibration.yaml` 保存
+- **CalibrationValidation** — 重投影误差叠加显示（`display_error`）、手眼 YAML 加载（兼容新旧格式）、在线位置一致性验证（`validate_handeye`）
+
+### 自动采集（AutoCollector）
+
+`include/auto_collector.hpp` / `src/auto_collector.cpp` — 直接移植自 ROS `image_pipeline/camera_calibration` 的 `calibrator.py`（BSD-3）。在 4 维归一化参数空间（X / Y / Size / Skew）中对样本去重，跟踪各维度覆盖进度，在画面上绘制 ROS 风格的进度条。运行时按 `a` 键切换。
+
+### 姿态输入（Serial_driver）
+
+`Serial_driver`（`include/serial_driver.hpp`）通过 `UartTransporter` 从串口读取四元数数据，在后台线程运行，通过线性插值提供与相机帧时间戳对齐的姿态。仅 `calibrateHandEye` 和 `validateHandEye` 使用，相机标定流程不涉及。
+
+### 展示层（WebViewer）
+
+`qd::WebViewer`（`include/web_viewer.hpp`）提供 `cv::imshow` / `cv::waitKey` / `cv::namedWindow` 风格的 API，但底层是嵌入式 HTTP/MJPEG 服务器（默认端口 8080）。用户在浏览器打开 `http://localhost:8080`，点击页面获得焦点后通过键盘操作。
+
+## 配置耦合与阅读重点
+
+以下几点既影响行为理解，也影响代码分支，不只是操作细节：
+
+- **内参不会自动回写**：`calibrateCamera` 产出的 `camera_calibration.yaml` 不会自动写入 `config/calibration.yaml`。手眼标定和重投影误差都从 `config/calibration.yaml` 中的 `camera_matrix` / `distort_coeffs` 读取内参，所以流程上必须先手动回写再进入下一步。
+- **IMG 模式的行为不同**：`Image_Reader` 是唯一 `is_exhausted()` 返回 `true` 的设备。在 IMG 模式下，`calibrateCamera` 会先预览每张图片的角点识别结果，由用户决定是否收集；全部图片读完后自动触发标定并退出。
+- **键盘依赖浏览器焦点**：WebViewer 的按键捕获依赖浏览器页面获得焦点。如果按键无响应，检查是否点击了页面。
+- **`calibrateCamera` 中自动采集的行为差异**：自动采集开启时实时识别标定板并按覆盖度去重；关闭时按 `s` 仅保存原始图像，标定板识别推迟到按 `c` 开始标定时才执行。
+- **设备选择的三态分支**：`device: HIK / UVC / IMG` 决定了设备构造、`wait_time` 值（IMG 为 0，其他为 1）、以及是否走 IMG 专用循环。
+
+## 环境依赖与构建
 
 ```bash
-sudo apt update
+# 依赖
 sudo apt install -y cmake g++ libopencv-dev libyaml-cpp-dev libfmt-dev libeigen3-dev
-# 写入海康相机 udev 规则
+
+# 海康相机 udev 规则（非 root 访问）
 sudo tee /etc/udev/rules.d/80-drivers-SDK-2bdf.rules >/dev/null <<'EOF'
 ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="2bdf", MODE="0666", GROUP="plugdev"
 EOF
-# 重新加载规则
 sudo udevadm control --reload-rules
-# 触发当前已连接设备的规则应用
 sudo udevadm trigger --action=add --subsystem-match=usb --attr-match=idVendor=2bdf
-```
 
----
-
-## 2. 编译
-
-在项目根目录执行：
-
-```bash
+# 构建
 cmake -S . -B build
 cmake --build build -j
+
+# 可选：构建并运行测试
+cmake -S . -B build -DBUILD_TESTING=ON && cmake --build build -j
+ctest --test-dir build --output-on-failure
 ```
 
-编译完成后可执行文件位于 `build/` 目录。
+## 配置说明
 
----
-
-## 3. 先改配置（必须）
-
-主配置文件：`config/calibration.yaml`
-
-重点字段：
-
-1. 输入源选择
+主配置文件 `config/calibration.yaml`，所有可执行程序共用。关键字段：
 
 ```yaml
-device: HIK   # 可选: HIK / UVC / IMG
-```
-
-2. 标定板参数（必须和实际标定板一致）
-
-```yaml
-pattern: chessboard   # chessboard / circles / acircles
+device: HIK               # HIK / UVC / IMG
+pattern: chessboard       # chessboard / circles / acircles
 pattern_rows: 8
 pattern_cols: 8
-square_size: 35       # 单位 mm
-```
+square_size: 35           # mm
 
-3. 对应输入源参数
+camera_matrix: [...]      # 相机内参（手眼标定和重投影误差的输入）
+distort_coeffs: [...]     # 畸变系数
 
-- `HIK`：曝光、增益、帧率等
-- `UVC`：`video_path`、分辨率、帧率
-- `IMG`：`images_path`（离线图片目录）
+Serial:                   # 手眼标定串口（仅 handeye 流程需要）
+  port_name: /dev/rm_usb0
+  baud_rate: 115200
 
-4. 数据保存路径
-
-```yaml
 camera_calib_save_path: ./camera_calib_images
 handeye_calib_save_path: ./handeye_calib_data
 ```
 
-5. 手眼标定串口参数（仅手眼流程需要）
+`HIK:` / `UVC:` / `IMG:` 子段分别为对应设备的参数，仅在该设备被选中时读取。
 
-```yaml
-Serial:
-	port_name: /dev/rm_usb0
-	baud_rate: 115200
-```
-
----
-
-## 4. 运行前说明（WebViewer）
-
-程序界面通过内置 Web 服务显示，默认端口 `8080`。
-
-1. 启动程序后，查看终端日志中 WebViewer 输出的地址列表，选择可访问的地址在浏览器打开（本机访问可用 `http://localhost:8080`）
-2. 点击页面使其获得焦点
-3. 再使用键盘快捷键（`s/a/c/r/ESC`）
-
----
-
-## 5. 相机标定（calibrateCamera）
-
-### 启动
+## 各程序启动方式
 
 ```bash
-./build/calibrateCamera
-```
+# 相机标定
+./build/calibrateCamera [--config-path=config/calibration.yaml]
 
-指定配置文件：
+# 手眼标定（在线采集）
+./build/calibrateHandEye [--config-path=config/calibration.yaml]
 
-```bash
-./build/calibrateCamera --config-path=config/calibration.yaml
-```
-
-### 操作键
-
-- `s`：手动采集当前帧
-- `a`：切换自动采集
-- `c`：开始计算内参
-- `ESC`：退出
-
-### 输出
-
-- 标定图片：`camera_calib_save_path/image_*.jpg`
-- 内参文件：`camera_calibration.yaml`（项目根目录）
-
----
-
-## 6. 手眼标定（calibrateHandEye）
-
-> 建议先完成相机内参标定，并将内参/畸变参数写入 `config/calibration.yaml`。
-
-### 6.1 在线采集并标定
-
-```bash
-./build/calibrateHandEye
-```
-
-操作键：
-
-- `s`：采集一组手眼数据（图像 + 云台姿态）
-- `c`：开始计算手眼参数
-- `ESC`：退出
-
-输出：
-
-- 采集数据：`handeye_calib_save_path/image_*.jpg`、`handeye_calib_save_path/pose_*.yaml`
-- 标定结果：`handeye_calibration.yaml`（项目根目录）
-
-### 6.2 从历史数据直接重算（离线）
-
-```bash
+# 手眼标定（离线重算）
 ./build/calibrateHandEye -l -d ./handeye_calib_data
+
+# 实时重投影误差查看
+./build/calculateError [--config-path=config/calibration.yaml]
+
+# 手眼标定验证
+./build/validateHandEye [--config-path=config/calibration.yaml] [--handeye-path=handeye_calibration.yaml]
+
+# 相机预览
+./build/previewCamera [--config-path=config/calibration.yaml]
 ```
 
-说明：目录内需成对存在 `image_xxx.jpg` 与 `pose_xxx.yaml`。
+### 通用操作键
 
----
+| 键 | 作用 |
+|---|---|
+| `s` | 手动采集当前帧 |
+| `a` | 切换自动采集（IMG 模式不可用） |
+| `c` | 开始标定计算 |
+| `r` | 重置验证统计（仅 `validateHandEye`） |
+| `ESC` | 退出 |
 
-## 7. 重投影误差查看（calculateError）
+## 常见问题
 
-```bash
-./build/calculateError
-```
-
-用途：实时显示 `RMSE(px)`，用于评估当前内参在实际图像中的重投影效果。
-
----
-
-## 8. 手眼结果验证（validateHandEye）
-
-```bash
-./build/validateHandEye
-```
-
-或指定手眼结果文件：
-
-```bash
-./build/validateHandEye --handeye-path=handeye_calibration.yaml
-```
-
-验证方式：固定标定板、转动云台，观察“世界坐标系下标定板位置一致性”。
-
-- `r`：重置统计
-- `ESC`：退出
-
-重点看两项：
-
-- `Position StdDev`：越小越稳定
-- `Reprojection Error`：越小越好
-
----
-
-## 9. 推荐完整流程
-
-1. 修改 `config/calibration.yaml`（输入源、标定板参数、串口）
-2. 运行 `calibrateCamera`，得到 `camera_calibration.yaml`
-3. 将内参与畸变参数更新到 `config/calibration.yaml`
-4. 运行 `calibrateHandEye` 采集并计算，得到 `handeye_calibration.yaml`
-5. 运行 `validateHandEye` 做结果稳定性验证
-
----
-
-## 10. 常见问题
-
-- 浏览器无画面：确认程序已启动，查看终端日志中 WebViewer 输出的地址列表，本机访问可用 `http://localhost:8080`
-- 按键无效：先点击网页让页面获得焦点
-- 一直提示图像为空：检查 `device` 配置及设备路径/图片路径
-- 手眼标定效果差：确保采集姿态丰富，且采集时标定板在世界坐标系中保持固定
+- **浏览器无画面**：确认程序已启动，查看终端日志中 WebViewer 输出的地址列表，本机访问 `http://localhost:8080`
+- **按键无效**：点击页面使其获得焦点后再按键
+- **一直提示图像为空**：检查 `device` 配置及对应设备路径/图片路径
+- **手眼标定效果差**：确保采集姿态覆盖充分，且采集时标定板在世界坐标系中位置固定
+- **IMG 模式行为不符合预期**：IMG 模式下 `calibrateCamera` 走独立循环，先预览角点再决定是否收集，全部读完自动触发标定
+- **手眼标定/误差计算无结果**：确认已将 `calibrateCamera` 产出的内参/畸变系数回写到 `config/calibration.yaml`
