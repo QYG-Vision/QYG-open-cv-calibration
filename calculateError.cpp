@@ -1,10 +1,12 @@
 #include "calibrate.hpp"
 #include "device.hpp"
 #include "device_factory.hpp"
+#include "frame_stats.hpp"
 #include <memory>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
 #include "web_viewer.hpp"
+#include <yaml-cpp/yaml.h>
 
 using namespace std;
 using namespace cv;
@@ -33,18 +35,21 @@ int main(int argc, char* argv[]) {
     auto device_ctx = qd::app::create_device(config_path);
     auto device = std::move(device_ctx.device);
     int wait_time = device_ctx.wait_time; // 用于图片显示延迟
+    auto device_type = YAML::LoadFile(config_path)["device"].as<std::string>();
     // 初始化标定类
     auto calibrate_ = qd::calibrate::Calibrate(config_path);
 
     // namedWindow("重投影误差");
     std::chrono::steady_clock::time_point timestamp;
     int count = 0;
-        qd::WebViewer viewer(8080);
+    qd::WebViewer viewer(8080);
     viewer.namedWindow("重投影误差");
+    qd::FrameStats stats;
     while (true) {
         // 获取图像和串口数据
         Mat img;
         device->read(img, timestamp);
+        stats.tickCapture(!img.empty());
 
         // 检查图像
         if (img.empty()) {
@@ -56,8 +61,9 @@ int main(int argc, char* argv[]) {
         }
 
         calibrate_.display_error(img);
-        // imshow("重投影误差", img);
+        stats.tickPublish(img.cols, img.rows);
         viewer.imshow("重投影误差", img);
+        viewer.setWindowStatus("重投影误差", stats.snapshot(device_type));
         int key = viewer.waitKey(wait_time);
 
         // waitKey(wait_time);

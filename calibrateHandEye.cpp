@@ -1,6 +1,7 @@
 #include "calibrate.hpp"
 #include "device.hpp"
 #include "device_factory.hpp"
+#include "frame_stats.hpp"
 #include "serial_driver.hpp"
 #include <memory>
 #include <opencv2/core/mat.hpp>
@@ -8,6 +9,7 @@
 #include <string>
 #include <vector>
 #include "web_viewer.hpp"
+#include <yaml-cpp/yaml.h>
 
 using namespace std;
 using namespace cv;
@@ -86,9 +88,10 @@ int main(int argc, char* argv[]) {
     // 初始化设备
     auto device_ctx = qd::app::create_device(config_path);
     auto device = std::move(device_ctx.device);
+    auto device_type = YAML::LoadFile(config_path)["device"].as<std::string>();
     // 手眼标定串口
     std::unique_ptr<Serial_driver> protocol_ = std::make_unique<Serial_driver>(config_path);
-    
+
     // namedWindow("手眼标定");
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
@@ -96,10 +99,12 @@ int main(int argc, char* argv[]) {
               << std::endl;
     qd::WebViewer viewer(8080);
     viewer.namedWindow("手眼标定");
+    qd::FrameStats stats;
     while (true) {
         // 获取图像和串口数据
         Mat img;
         device->read(img, timestamp);
+        stats.tickCapture(!img.empty());
         q = protocol_->read(timestamp);
 
         // 检查图像
@@ -130,8 +135,9 @@ int main(int argc, char* argv[]) {
         calibrate_.show_collected_corners(img);
         calibrate_.display_rpy(img, q); // 可视化角度
 
-        // imshow("手眼标定", img);
+        stats.tickPublish(img.cols, img.rows);
         viewer.imshow("手眼标定", img);
+        viewer.setWindowStatus("手眼标定", stats.snapshot(device_type));
 
     }
 

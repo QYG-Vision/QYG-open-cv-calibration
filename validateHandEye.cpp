@@ -1,11 +1,13 @@
 #include "calibrate.hpp"
 #include "device.hpp"
 #include "device_factory.hpp"
+#include "frame_stats.hpp"
 #include "serial_driver.hpp"
 #include <memory>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
 #include "web_viewer.hpp"
+#include <yaml-cpp/yaml.h>
 
 using namespace std;
 using namespace cv;
@@ -36,6 +38,7 @@ int main(int argc, char* argv[]) {
     // 初始化设备
     auto device_ctx = qd::app::create_device(config_path);
     auto device = std::move(device_ctx.device);
+    auto device_type = YAML::LoadFile(config_path)["device"].as<std::string>();
     // 初始化标定类
     auto calibrate_ = qd::calibrate::Calibrate(config_path);
 
@@ -51,6 +54,8 @@ int main(int argc, char* argv[]) {
         qd::WebViewer viewer(8080);
     viewer.namedWindow("手眼标定验证");
 
+    qd::FrameStats stats;
+
     std::chrono::steady_clock::time_point timestamp;
     Eigen::Quaterniond q;
 
@@ -63,6 +68,7 @@ int main(int argc, char* argv[]) {
         // 获取图像和串口数据
         Mat img;
         device->read(img, timestamp);
+        stats.tickCapture(!img.empty());
         q = protocol_->read(timestamp);
 
         // 检查图像
@@ -77,7 +83,9 @@ int main(int argc, char* argv[]) {
         // 显示云台姿态（用于参考）
         // calibrate_.display_rpy(img, q);
 
+        stats.tickPublish(img.cols, img.rows);
         viewer.imshow("手眼标定验证", img);
+        viewer.setWindowStatus("手眼标定验证", stats.snapshot(device_type));
 
         int key = viewer.waitKey(10);
         if (key == 27) {

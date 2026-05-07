@@ -1,9 +1,8 @@
 #include "device.hpp"
 #include "device_factory.hpp"
+#include "frame_stats.hpp"
 #include "web_viewer.hpp"
 
-#include <chrono>
-#include <cmath>
 #include <iostream>
 #include <memory>
 #include <opencv2/core/mat.hpp>
@@ -50,30 +49,15 @@ int main(int argc, char* argv[]) {
               << "====================================\n"
               << std::endl;
 
-    const auto start_time = std::chrono::steady_clock::now();
-
-    // 帧率统计
-    const auto fps_window = std::chrono::steady_clock::duration(
-        std::chrono::milliseconds(1000));
-    auto capture_count       = 0ULL;
-    auto publish_count        = 0ULL;
-    auto empty_count          = 0ULL;
-    auto total_frames         = 0ULL;
-    auto fps_slice_start      = start_time;
-    auto fps_slice_captures   = 0ULL;
-    auto fps_slice_publishes  = 0ULL;
-    double capture_fps        = 0.0;
-    double publish_fps        = 0.0;
-    std::chrono::steady_clock::time_point last_frame_ts = start_time;
+    qd::FrameStats stats;
 
     std::chrono::steady_clock::time_point timestamp;
     while (true) {
         Mat img;
         device->read(img, timestamp);
-        ++total_frames;
+        stats.tickCapture(!img.empty());
 
         if (img.empty()) {
-            ++empty_count;
             if (device->is_exhausted()) {
                 std::cout << "设备已耗尽，退出预览。" << std::endl;
                 break;
@@ -83,56 +67,18 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        ++capture_count;
-        ++fps_slice_captures;
-        last_frame_ts = timestamp;
-
+        stats.tickPublish(img.cols, img.rows);
         viewer.imshow("相机预览", img);
-        ++publish_count;
-        ++fps_slice_publishes;
-
-        // 每秒刷新一次 FPS
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                now - fps_slice_start)
-                .count();
-        if (elapsed >= 1000) {
-            capture_fps =
-                static_cast<double>(fps_slice_captures) * 1000.0 / elapsed;
-            publish_fps =
-                static_cast<double>(fps_slice_publishes) * 1000.0 / elapsed;
-            fps_slice_start    = now;
-            fps_slice_captures  = 0;
-            fps_slice_publishes = 0;
-        }
-
-        // 更新窗口状态
-        WindowStatus status;
-        status.device_type = device_type;
-        status.resolution =
-            std::to_string(img.cols) + "x" + std::to_string(img.rows);
-        status.capture_fps      = capture_fps;
-        status.publish_fps      = publish_fps;
-        status.frame_age_ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                now - last_frame_ts)
-                .count();
-        status.empty_frame_count = empty_count;
-        status.total_frames      = total_frames;
-        status.uptime_s =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                now - start_time)
-                .count() /
-            1000.0;
-        viewer.setWindowStatus("相机预览", status);
+        viewer.setWindowStatus("相机预览", stats.snapshot(device_type));
 
         int key = viewer.waitKey(wait_time);
         if (key == 27) break;
     }
 
     viewer.destroyAllWindows();
-    std::cout << "预览结束，共处理 " << total_frames << " 帧，"
-              << "其中空帧 " << empty_count << " 个。" << std::endl;
+    auto final_snap = stats.snapshot(device_type);
+    std::cout << "预览结束，共处理 " << final_snap.total_frames << " 帧，"
+              << "其中空帧 " << final_snap.empty_frame_count << " 个。"
+              << std::endl;
     return 0;
 }

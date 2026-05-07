@@ -1,6 +1,7 @@
 #include "calibrate.hpp"
 #include "device.hpp"
 #include "device_factory.hpp"
+#include "frame_stats.hpp"
 #include <memory>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
@@ -52,7 +53,9 @@ void print_camera_instructions(bool image_mode) {
 int run_image_sequence_loop(
     qd::Device::Device& device,
     qd::calibrate::Calibrate& calibrate_,
-    qd::WebViewer& viewer
+    qd::WebViewer& viewer,
+    qd::FrameStats& stats,
+    const std::string& device_type
 ) {
     auto load_next_preview_frame =
         [&](cv::Mat& raw_img,
@@ -60,6 +63,7 @@ int run_image_sequence_loop(
             std::chrono::steady_clock::time_point& timestamp) {
             while (true) {
                 device.read(raw_img, timestamp);
+                stats.tickCapture(!raw_img.empty());
                 if (!raw_img.empty()) {
                     display_img = raw_img.clone();
                     calibrate_.preview_camera(display_img);
@@ -99,7 +103,9 @@ int run_image_sequence_loop(
     }
 
     while (true) {
+        stats.tickPublish(display_img.cols, display_img.rows);
         viewer.imshow("相机标定", display_img);
+        viewer.setWindowStatus("相机标定", stats.snapshot(device_type));
         const int key = viewer.waitKey(50);
 
         if (key < 0) {
@@ -156,7 +162,8 @@ int main(int argc, char* argv[]) {
     }
 
     auto config_path = cli.get<std::string>("config-path");
-    const bool image_mode = load_device_type(config_path) == "IMG";
+    auto device_type = load_device_type(config_path);
+    const bool image_mode = device_type == "IMG";
 
     // 初始化设备
     auto device_ctx = qd::app::create_device(config_path);
@@ -171,13 +178,18 @@ int main(int argc, char* argv[]) {
     print_camera_instructions(image_mode);
 
     if (image_mode) {
-        return run_image_sequence_loop(*device, calibrate_, viewer);
+        qd::FrameStats stats;
+        return run_image_sequence_loop(*device, calibrate_, viewer, stats,
+                                       device_type);
     }
+
+    qd::FrameStats stats;
 
     std::chrono::steady_clock::time_point timestamp;
     while (true) {
         Mat img;
         device->read(img, timestamp);
+        stats.tickCapture(!img.empty());
 
         if (img.empty()) {
             if (device->is_exhausted()) {
@@ -207,8 +219,9 @@ int main(int argc, char* argv[]) {
 
         calibrate_.collect_camera(img, key == 's');
 
-        // imshow("相机标定", img);
+        stats.tickPublish(img.cols, img.rows);
         viewer.imshow("相机标定", img);
+        viewer.setWindowStatus("相机标定", stats.snapshot(device_type));
     }
 
     device.reset();
