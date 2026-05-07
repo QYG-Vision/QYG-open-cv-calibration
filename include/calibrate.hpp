@@ -376,6 +376,8 @@ public:
     // ---- 内参标定 ----
 
     /// @brief 收集相机标定数据 (单帧)
+    /// @details 自动采集开启时进行实时标定板识别；关闭时仅在按下 s 后保存原始图像，
+    ///          标定板识别推迟到 calibrate_camera()。
     /// @param img 原始图像
     /// @param enable_collect 是否触发采集 (手动按 s 或自动采集判定)
     /// @return 始终返回 true
@@ -402,7 +404,7 @@ public:
     /// @brief 查询自动采集是否启用
     bool is_auto_collect_enabled() const;
 
-    /// @brief 当前已收集的相机标定样本数
+    /// @brief 当前已保存的相机标定图像数
     int collected_camera_count() const;
 
     // ---- 外参 (手眼) 标定 ----

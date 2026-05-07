@@ -37,8 +37,9 @@ public:
                         double auto_collect_sharpness_threshold);
 
     /// @brief 收集一帧相机标定数据
-    /// @details 包含棋盘检测、自动采集判定 (基于 ROS calibrator 参数去重)、
-    ///          清晰度门控及可选的手动 s 键强制采集。
+    /// @details 自动采集开启时执行实时标定板检测、自动采集判定 (基于 ROS calibrator
+    ///          参数去重)、清晰度门控及可选的手动 s 键强制采集；自动采集关闭时，
+    ///          s 键仅保存原始图像，标定板识别推迟到 calibrate_camera()。
     /// @param img 原始图像 (BGR)
     /// @param enable_collect 手动采集标志 (按键 s)
     /// @return 始终返回 true
@@ -67,8 +68,8 @@ public:
     /// @brief 查询当前自动采集是否启用
     bool is_auto_collect_enabled() const;
 
-    /// @brief 当前已收集的相机标定样本数
-    int collected_count() const { return collected_count_; }
+    /// @brief 当前已保存的相机标定图像数
+    int collected_count() const { return saved_image_count_; }
 
     /// @brief 获取标定板参数引用 (供同级组件读取)
     const Paramer& paramer_ref() const { return paramer_; }
@@ -99,8 +100,9 @@ private:
     std::vector<std::vector<cv::Point3f>> obj_points_;
     std::vector<std::vector<cv::Point2f>> img_points_;
 
-    int            collected_count_ = 0;
+    int            saved_image_count_ = 0;
     std::string    camera_calib_save_path_;
+    std::vector<std::string> pending_manual_image_paths_;
 
     /// 自动采集器
     std::unique_ptr<AutoCollector> auto_collector_;
@@ -114,12 +116,17 @@ private:
                             const FrameAnalysis& analysis,
                             bool show_auto_progress,
                             bool auto_enabled);
+    void draw_manual_collection_status(cv::Mat& img) const;
+    bool append_analyzed_sample(const FrameAnalysis& analysis,
+                                bool add_auto_sample);
     bool collect_analyzed_frame(const cv::Mat& img,
                                 const FrameAnalysis& analysis,
                                 bool add_auto_sample);
+    bool save_manual_frame_for_later(const cv::Mat& img);
+    void process_pending_manual_samples();
 
     /// @brief 将当前帧保存为 JPEG 到 camera_calib_save_path
-    void save_camera_image(const cv::Mat& img, int index);
+    std::string save_camera_image(const cv::Mat& img, int index);
 
     /// @brief 保存相机标定结果 YAML (内参矩阵 / 畸变 / 矫正矩阵 / 投影矩阵)
     void saveCalibrationYAML(const cv::Size& image_size,

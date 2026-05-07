@@ -46,6 +46,7 @@ void print_camera_instructions(bool image_mode) {
               << "  'a'   - 切换自动采集模式（直接移植自 ROS image_pipeline/camera_calibration）\n"
               << "  'c'   - 开始计算标定参数\n"
               << "  'ESC' - 退出\n"
+              << "  自动采集开启后才会实时识别标定板；关闭时按 's' 仅保存原始图像，按 'c' 时再统一识别\n"
               << "  自动采集策略：基于棋盘归一化参数 (X/Y/Size/Skew) 去重并统计覆盖度"
               << std::endl;
 }

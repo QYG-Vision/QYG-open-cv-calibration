@@ -76,10 +76,16 @@ protected:
         sample_image_path_ =
             (fs::path(TEST_DATA_DIR) / "handeye_calib_data" / "image_1.jpg").string();
         save_dir_ = unique_temp_name("_camera_samples");
+        camera_yaml_output_ = fs::current_path() / "camera_calibration.yaml";
+        camera_yaml_existed_before_ = fs::exists(camera_yaml_output_);
     }
 
     void TearDown() override {
         fs::remove_all(save_dir_);
+        if (!camera_yaml_existed_before_) {
+            std::error_code ec;
+            fs::remove(camera_yaml_output_, ec);
+        }
     }
 
     std::unique_ptr<CalibratorHarness>
@@ -100,6 +106,8 @@ protected:
     std::string config_path_;
     std::string sample_image_path_;
     fs::path    save_dir_;
+    fs::path    camera_yaml_output_;
+    bool        camera_yaml_existed_before_ = false;
 };
 
 TEST_F(IntrinsicCalibratorTest, PreviewDoesNotCollectOrSaveImage) {
@@ -143,11 +151,35 @@ TEST_F(IntrinsicCalibratorTest, PreviewAfterCollectKeepsCollectedCount) {
     EXPECT_EQ(count_saved_images(save_dir_), 1);
 }
 
-TEST_F(IntrinsicCalibratorTest, LegacyCollectCameraStillCollectsManualSample) {
+TEST_F(IntrinsicCalibratorTest, CollectCameraWithoutAutoCollectSavesRawFrameEvenWithoutBoard) {
+    auto calibrator = make_calibrator();
+    auto sample = load_sample_image();
+    cv::Mat blank = cv::Mat::zeros(sample.size(), sample.type());
+
+    EXPECT_TRUE(calibrator->calibrator.collect_camera(blank, true));
+    EXPECT_EQ(calibrator->calibrator.collected_count(), 1);
+    EXPECT_EQ(count_saved_images(save_dir_), 1);
+}
+
+TEST_F(IntrinsicCalibratorTest, CollectCameraWithAutoCollectStillRequiresDetectedBoard) {
+    auto calibrator = make_calibrator(true);
+    auto sample = load_sample_image();
+    cv::Mat blank = cv::Mat::zeros(sample.size(), sample.type());
+
+    EXPECT_TRUE(calibrator->calibrator.collect_camera(blank, true));
+    EXPECT_EQ(calibrator->calibrator.collected_count(), 0);
+    EXPECT_EQ(count_saved_images(save_dir_), 0);
+}
+
+TEST_F(IntrinsicCalibratorTest, CalibrateCameraProcessesDeferredManualSamples) {
     auto calibrator = make_calibrator();
     auto raw = load_sample_image();
 
-    EXPECT_TRUE(calibrator->calibrator.collect_camera(raw, true));
-    EXPECT_EQ(calibrator->calibrator.collected_count(), 1);
-    EXPECT_EQ(count_saved_images(save_dir_), 1);
+    ASSERT_TRUE(calibrator->calibrator.collect_camera(raw, true));
+    ASSERT_EQ(calibrator->calibrator.collected_count(), 1);
+    ASSERT_EQ(count_saved_images(save_dir_), 1);
+
+    EXPECT_TRUE(calibrator->calibrator.calibrate_camera());
+    EXPECT_EQ(calibrator->calibrator.collected_count(), 0);
+    EXPECT_TRUE(fs::exists(camera_yaml_output_));
 }

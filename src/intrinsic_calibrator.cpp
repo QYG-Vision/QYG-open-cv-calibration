@@ -40,8 +40,17 @@ IntrinsicCalibrator::IntrinsicCalibrator(
 }
 
 bool IntrinsicCalibrator::collect_camera(Mat& img, bool enable_collect) {
-    auto analysis = analyze_frame(img);
     const bool auto_enabled = auto_collector_ && auto_collector_->enabled();
+    if (!auto_enabled) {
+        last_frame_corners_.clear();
+        if (enable_collect) {
+            save_manual_frame_for_later(img);
+        }
+        draw_manual_collection_status(img);
+        return true;
+    }
+
+    auto analysis = analyze_frame(img);
     const auto raw_img = img.clone();
 
     if (analysis.found) {
@@ -76,6 +85,8 @@ bool IntrinsicCalibrator::confirm_collect_camera(const cv::Mat& img) {
 }
 
 bool IntrinsicCalibrator::calibrate_camera() {
+    process_pending_manual_samples();
+
     if (obj_points_.size() < 1) {
         std::cerr << "Not enough data for calibration. Need at least 1 valid image." << std::endl;
         return false;
@@ -150,7 +161,12 @@ bool IntrinsicCalibrator::calibrate_camera() {
 
     obj_points_.clear();
     img_points_.clear();
-    collected_count_ = 0;
+    pending_manual_image_paths_.clear();
+    last_frame_corners_.clear();
+    saved_image_count_ = 0;
+    if (auto_collector_) {
+        auto_collector_->reset();
+    }
     return true;
 }
 
@@ -159,6 +175,7 @@ void IntrinsicCalibrator::set_auto_collect(bool enable) {
         return;
     }
     auto_collector_->set_enabled(enable);
+    last_frame_corners_.clear();
     std::cout << (enable ? "[AutoCollect] 自动采集已启用"
                           : "[AutoCollect] 自动采集已关闭")
               << std::endl;
@@ -224,7 +241,7 @@ void IntrinsicCalibrator::draw_frame_overlay(
         analysis.found
     );
 
-    std::string text = "Collected: " + std::to_string(this->collected_count_);
+    std::string text = "Collected: " + std::to_string(this->saved_image_count_);
     if (auto_enabled) {
         text += "  [AUTO]";
     }
@@ -233,8 +250,15 @@ void IntrinsicCalibrator::draw_frame_overlay(
     );
 }
 
-bool IntrinsicCalibrator::collect_analyzed_frame(
-    const cv::Mat& img,
+void IntrinsicCalibrator::draw_manual_collection_status(cv::Mat& img) const {
+    const std::string text =
+        "Collected: " + std::to_string(saved_image_count_) + "  [MANUAL]";
+    cv::putText(
+        img, text, { 10, 30 }, cv::FONT_HERSHEY_SIMPLEX, 1, { 0, 255, 0 }, 2
+    );
+}
+
+bool IntrinsicCalibrator::append_analyzed_sample(
     const FrameAnalysis& analysis,
     bool add_auto_sample
 ) {
@@ -252,8 +276,6 @@ bool IntrinsicCalibrator::collect_analyzed_frame(
 
     obj_points_.push_back(analysis.object_points);
     img_points_.push_back(analysis.pixel_points);
-    this->collected_count_++;
-    save_camera_image(img, this->collected_count_);
     if (auto_collector_ && add_auto_sample && analysis.params_ok) {
         auto_collector_->add_sample(analysis.params);
     }
@@ -261,10 +283,72 @@ bool IntrinsicCalibrator::collect_analyzed_frame(
     return true;
 }
 
-void IntrinsicCalibrator::save_camera_image(const cv::Mat& img, int index) {
+bool IntrinsicCalibrator::collect_analyzed_frame(
+    const cv::Mat& img,
+    const FrameAnalysis& analysis,
+    bool add_auto_sample
+) {
+    if (!append_analyzed_sample(analysis, add_auto_sample)) {
+        return false;
+    }
+
+    const int image_index = saved_image_count_ + 1;
+    save_camera_image(img, image_index);
+    saved_image_count_ = image_index;
+
+    return true;
+}
+
+bool IntrinsicCalibrator::save_manual_frame_for_later(const cv::Mat& img) {
+    if (img.empty()) {
+        return false;
+    }
+
+    const int image_index = saved_image_count_ + 1;
+    const std::string filename = save_camera_image(img, image_index);
+    pending_manual_image_paths_.push_back(filename);
+    saved_image_count_ = image_index;
+    std::cout << "[ManualCollect] 已保存原始标定图像，按 'c' 时再识别标定板。"
+              << std::endl;
+    return true;
+}
+
+void IntrinsicCalibrator::process_pending_manual_samples() {
+    if (pending_manual_image_paths_.empty()) {
+        return;
+    }
+
+    std::size_t valid_count = 0;
+    std::size_t skipped_count = 0;
+    std::cout << "[ManualCollect] 开始处理 " << pending_manual_image_paths_.size()
+              << " 张已收集图像，执行标定板识别。" << std::endl;
+
+    for (const auto& image_path : pending_manual_image_paths_) {
+        auto img = cv::imread(image_path);
+        if (img.empty()) {
+            ++skipped_count;
+            std::cout << "[警告] 无法读取已收集图像: " << image_path << std::endl;
+            continue;
+        }
+
+        auto analysis = analyze_frame(img);
+        if (append_analyzed_sample(analysis, false)) {
+            ++valid_count;
+        } else {
+            ++skipped_count;
+        }
+    }
+
+    pending_manual_image_paths_.clear();
+    std::cout << "[ManualCollect] 标定板识别完成：有效 " << valid_count
+              << " 张，跳过 " << skipped_count << " 张。" << std::endl;
+}
+
+std::string IntrinsicCalibrator::save_camera_image(const cv::Mat& img, int index) {
     std::string filename = camera_calib_save_path_ + "/image_" + std::to_string(index) + ".jpg";
     cv::imwrite(filename, img);
     std::cout << "已保存相机标定图片: " << filename << std::endl;
+    return filename;
 }
 
 void IntrinsicCalibrator::saveCalibrationYAML(
