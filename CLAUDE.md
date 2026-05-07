@@ -16,7 +16,18 @@ Tests are wired into CMake via CTest + GoogleTest (FetchContent). Enable with `-
 cmake -S . -B build -DBUILD_TESTING=ON && cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
-Tests live in `tests/unit/` (library tests) and `tests/integration/` (CLI black-box). Test data under `tests/data/` is kept separate from production assets. `.clang-format` and `.clang-tidy` exist at the repo root — invoke them directly (`clang-format -i <file>`, `clang-tidy -p build <file>`). `compile_commands.json` is exported for clangd.
+Tests live in `tests/unit/` (library tests) and `tests/integration/` (CLI black-box). Test data under `tests/data/` is kept separate from production assets.
+
+Run a single test binary directly:
+```bash
+./build/test_intrinsic_calibrator
+# or with gtest_filter:
+./build/test_intrinsic_calibrator --gtest_filter=IntrinsicCalibrator.*
+```
+
+`.clang-format` and `.clang-tidy` exist at the repo root — invoke them directly (`clang-format -i <file>`, `clang-tidy -p build <file>`). `compile_commands.json` is exported for clangd.
+
+Public APIs in `include/` carry Doxygen comments: prefer `///` on declarations in headers, `/** ... */` for file-level blocks and larger entry points in `.cpp` files. Start with `@brief`, add `@details` only when behavior or constraints are not obvious. Use `@param`, `@param[out]`, and `@return`.
 
 The four executables all live in `build/` and accept `--config-path=<yaml>` (default `config/calibration.yaml`):
 
@@ -29,13 +40,19 @@ The four executables all live in `build/` and accept `--config-path=<yaml>` (def
 
 Each executable is a thin `main` (`calibrateCamera.cpp`, `calibrateHandEye.cpp`, `calculateError.cpp`, `validateHandEye.cpp`) at the repo root. All shared logic lives under `src/` + `include/` and is built once into the `calibration_core` static library, which every executable links. When adding shared functionality, put it in `src/` so all four binaries get it for free; only put loop/CLI glue in the top-level `*.cpp` files.
 
-**Device abstraction.** `qd::Device::Device` (`include/device.hpp`) is a pure virtual `read(img, timestamp)` interface. Three implementations: `Hik_Camera` (HIK SDK + background thread + `ThreadSafeQueue`), `UVC_Camera` (`cv::VideoCapture`), `Image_Reader` (offline directory; the only one that ever returns `is_exhausted() == true`). `qd::app::create_device(config_path)` (`src/device_factory.cpp`) is the single switch on the YAML `device:` field — add new sources here. The factory also returns a `wait_time` hint (0 for `IMG`, 1 for live cameras) used as the `WebViewer::waitKey` delay.
+**Device abstraction.** `qd::Device::Device` (`include/device.hpp`) is a pure virtual `read(img, timestamp)` interface. Three implementations: `Hik_Camera` (HIK SDK + background thread + `ThreadSafeQueue`), `UVC_Camera` (`cv::VideoCapture`), `Image_Reader` (offline directory; the only one that ever returns `is_exhausted() == true`). `qd::app::create_device(config_path)` (`src/device_factory.cpp`, declared in `include/device_factory.hpp`) is the single switch on the YAML `device:` field — add new sources here. The factory returns a `DeviceContext` struct containing the device ptr and a `wait_time` hint (0 for `IMG`, 1 for live cameras) used as the `WebViewer::waitKey` delay. When `device:` is `IMG` and all images are consumed, `calibrateCamera` auto-triggers `calibrate_camera()` and exits.
 
 **UI is a Web viewer, not OpenCV HighGUI.** `qd::WebViewer` (`include/web_viewer.hpp`) runs an embedded HTTP/MJPEG server on port 8080 and exposes a `cv::imshow`/`cv::waitKey`/`cv::namedWindow`-shaped API. The user opens `http://localhost:8080` and must click the page so it has focus before keys (`s`/`a`/`c`/`r`/`ESC`) are captured. Do **not** add `cv::imshow` or `cv::waitKey` calls — keep using the viewer instance the executables already construct.
 
-**Calibration core** is `qd::calibrate::Calibrate` in `include/calibrate.hpp` / `src/calibrate.cpp` — a single class that owns: chessboard/circle-grid corner finding, intrinsics solve (`calibrate_camera`), hand-eye solve (`calibrate_handeye`), reprojection-error overlay (`display_error`), and the hand-eye validation flow (`load_handeye_calibration`, `validate_handeye`, `reset_validation_stats`). It also persists results to YAML and statistics RPY ranges over collected samples. `Paramer` (same header) parses board geometry from YAML.
+**Calibration core** is now a facade + three delegate classes. `qd::calibrate::Calibrate` (`include/calibrate.hpp` / `src/calibrate.cpp`) is a thin public API that delegates to:
 
-**Auto-collection (`include/auto_collector.hpp` / `src/auto_collector.cpp`)** is a direct port of ROS `image_pipeline/camera_calibration`'s `calibrator.py` (BSD-3, attribution preserved in headers). It deduplicates samples in a 4-D normalized parameter space (X/Y/Size/Skew), tracks per-axis coverage progress, and draws the ROS-style progress bars on the live image. The thresholds (`auto_collect_param_distance`, `auto_collect_param_ranges`, `auto_collect_goodenough_samples`, `auto_collect_max_chessboard_speed`) match ROS defaults; `auto_collect_sharpness_threshold` is a project-specific Laplacian-variance gate that is **not** in the ROS original. Toggle at runtime with `a`.
+- `IntrinsicCalibrator` (`include/intrinsic_calibrator.hpp` / `src/intrinsic_calibrator.cpp`) — chessboard/circle-grid detection, auto-collector integration, `cv::calibrateCamera`, output save.
+- `ExtrinsicCalibrator` (`include/extrinsic_calibrator.hpp` / `src/extrinsic_calibrator.cpp`) — PnP solve per frame, `cv::calibrateRobotWorldHandEye`, offline folder loading, gimbal2camera YAML save.
+- `CalibrationValidation` (`include/calibration_validation.hpp` / `src/calibration_validation.cpp`) — reprojection-error overlay (`display_error`), handeye YAML loading (supports old `R_camera2gimbal` and new `gimbal2camera` formats), online position-consistency validation.
+
+`Paramer` (in `calibrate.hpp`) parses board geometry from YAML. Shared free functions for corner finding, board-orientation drawing, sharpness computation, and frame analysis also live in `calibrate.hpp`.
+
+**Auto-collection (`include/auto_collector.hpp` / `src/auto_collector.cpp`)** is a direct port of ROS `image_pipeline/camera_calibration`'s `calibrator.py` (BSD-3, attribution preserved in headers). It deduplicates samples in a 4-D normalized parameter space (X/Y/Size/Skew), tracks per-axis coverage progress, and draws the ROS-style progress bars on the live image. The thresholds (`auto_collect_param_distance`, `auto_collect_param_ranges`, `auto_collect_goodenough_samples`, `auto_collect_max_chessboard_speed`) match ROS defaults; `auto_collect_sharpness_threshold` is a project-specific Laplacian-variance gate that is **not** in the ROS original. `auto_collect_interval_ms` is an additional project-level rate limiter. Toggle at runtime with `a`.
 
 **Serial / IMU.** `Serial_driver` (`include/serial_driver.hpp`) reads quaternion data from a UART (`UartTransporter`) on a daemon thread and serves time-aligned poses via linear interpolation against the camera frame timestamp. Used by `calibrateHandEye` and `validateHandEye`; not used by camera-only flows. Default port `/dev/rm_usb0` (configurable under `Serial:` in YAML).
 
