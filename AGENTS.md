@@ -38,10 +38,11 @@ Public APIs in `include/` should carry Doxygen comments. Match the existing proj
 
 ## Architecture
 
-Four thin `main` files in `apps/` (`calibrateCamera.cpp`, `calibrateHandEye.cpp`,
-`calculateError.cpp`, `validateHandEye.cpp`) plus `previewCamera.cpp`. Shared logic lives
-in `src/` + `include/` and compiles into the `calibration_core` static library. New shared
-code goes in `src/`, new executables go in `apps/`.
+Six thin `main` files in `apps/` (`calibrateCamera.cpp`, `calibrateHandEye.cpp`,
+`calculateError.cpp`, `validateHandEye.cpp`, `previewCamera.cpp`,
+`calibrationWorkbench.cpp`). Shared logic lives in `src/` + `include/` and compiles into
+the `calibration_core` static library. New shared code goes in `src/`, new executables go
+in `apps/`.
 
 ## Device abstraction
 
@@ -66,8 +67,30 @@ and click the page to give it focus before keypresses (`s`/`a`/`c`/`r`/`ESC`) re
 
 After running `calibrateCamera`, the `camera_matrix` and `distort_coeffs` arrays in the
 generated `camera_calibration.yaml` must be copied back into `config/calibration.yaml`
-before running hand-eye flows. Hand-eye calibration and reprojection-error calculation
-read intrinsics from the config file, not from the camera calibration output.
+before running hand-eye flows when you use the classic CLI tools. Hand-eye calibration and
+reprojection-error calculation read intrinsics from the config file, not from the camera
+calibration output. `calibrationWorkbench` is the exception: after intrinsic calibration,
+it enters a review state and only writes the new intrinsics into `config/calibration.yaml`
+after the user accepts them.
+
+## Workbench gotchas
+
+`calibrationWorkbench` is a browser-driven task UI layered on top of the same core library.
+The state machine lives in `TaskController`, config JSON/YAML bridging lives in
+`ConfigManager`, and re-calibration backups live in `BackupManager` under
+`backups/<task>/<timestamp>/`.
+
+When you add a new workbench task or action, keep the backend and frontend in sync:
+
+- `TaskType` / `TaskAction` in `include/task_controller.hpp`
+- string decoding in `apps/calibrationWorkbench.cpp`
+- `taskDefs` and action handling in `include/workbench_page.hpp`
+
+When you add an editable config field, update all three surfaces:
+
+- `ConfigManager::to_json()`
+- `ConfigManager::update_from_json()`
+- the form field wiring in `include/workbench_page.hpp`
 
 ## CLI args
 
@@ -77,6 +100,7 @@ Uses `cv::CommandLineParser` with hyphenated keys:
 ./build/calibrateCamera --config-path=config/calibration.yaml
 ./build/calibrateHandEye -l -d ./handeye_calib_data   # offline recompute
 ./build/validateHandEye --handeye-path=handeye_calibration.yaml
+./build/calibrationWorkbench --config-path=config/calibration.yaml
 ```
 
 Default config path is `config/calibration.yaml`.
