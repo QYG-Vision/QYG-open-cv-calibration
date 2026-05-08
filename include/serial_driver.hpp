@@ -1,3 +1,5 @@
+#pragma once
+
 #include "thread_safe_queue.hpp"
 #include "uart_transporter.hpp"
 #include <Eigen/Dense>

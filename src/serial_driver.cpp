@@ -5,6 +5,7 @@
 #include <fmt/core.h>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 
 Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
     auto yaml = YAML::LoadFile(config_path);
@@ -18,9 +19,17 @@ Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
 
     uart_transporter = std::make_unique<UartTransporter>(port_name, baud_rate);
 
-    while (!uart_transporter->open()) {
-        fmt::print("serial open failed, retrying... \n");
+    bool opened = false;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        if (uart_transporter->open()) {
+            opened = true;
+            break;
+        }
+        fmt::print("serial open failed, retrying... ({}/5)\n", attempt + 1);
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+    if (!opened) {
+        throw std::runtime_error("serial open failed: " + port_name);
     }
 
     // queue_.push(data_ahead_);
@@ -56,6 +65,8 @@ Serial_driver::~Serial_driver() {
     running_ = false;
     if (daemon_thread_.joinable())
         daemon_thread_.join();
+    if (uart_transporter)
+        uart_transporter->close();
 }
 
 Eigen::Quaterniond Serial_driver::read(std::chrono::steady_clock::time_point timestamp) {

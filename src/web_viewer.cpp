@@ -380,6 +380,17 @@ void WebViewer::setWindowStatus(const std::string& winname,
     status_map_[winname] = status;
 }
 
+void WebViewer::setCustomPage(const std::string& html) {
+    custom_page_ = html;
+}
+
+void WebViewer::addRoute(const std::string& method,
+                          const std::string& path,
+                          RouteHandler handler) {
+    std::lock_guard<std::mutex> lock(routes_mtx_);
+    routes_.emplace_back(method, path, std::move(handler));
+}
+
 // ---------------------------------------------------------------------------
 // server
 // ---------------------------------------------------------------------------
@@ -445,8 +456,24 @@ void WebViewer::handle_client(int fd) {
     if (qpos != std::string::npos) base_path = path.substr(0, qpos);
 
     if (method == "GET") {
+        // --- custom routes first ---
+        {
+            std::lock_guard<std::mutex> lock(routes_mtx_);
+            for (const auto& [rm, rp, handler] : routes_) {
+                if (rm == method && base_path.rfind(rp, 0) == 0) {
+                    RouteResponse resp = handler(method, path, "");
+                    send_response(fd, resp.status, resp.content_type, resp.body);
+                    return;
+                }
+            }
+        }
+
         if (base_path == "/") {
-            send_html_page(fd);
+            if (!custom_page_.empty()) {
+                send_response(fd, 200, "text/html; charset=utf-8", custom_page_);
+            } else {
+                send_html_page(fd);
+            }
         } else if (base_path == "/stream") {
             send_mjpeg_stream(fd, query_param(path, "window"));
         } else if (base_path == "/api/windows") {
@@ -456,26 +483,46 @@ void WebViewer::handle_client(int fd) {
         } else {
             send_response(fd, 404, "text/plain", "Not Found");
         }
-    } else if (method == "POST" && base_path == "/key") {
-        auto body_start = request.find("\r\n\r\n");
-        if (body_start != std::string::npos) {
-            std::string body     = request.substr(body_start + 4);
-            auto        key_pos  = body.find("\"key\"");
-            if (key_pos != std::string::npos) {
-                auto colon = body.find(':', key_pos);
-                if (colon != std::string::npos) {
-                    try {
-                        int key_code = std::stoi(body.substr(colon + 1));
-                        {
-                            std::lock_guard<std::mutex> lock(key_mtx_);
-                            keys_.push(key_code);
-                        }
-                        key_cv_.notify_one();
-                    } catch (...) {}
+    } else if (method == "POST") {
+        // --- custom routes first ---
+        {
+            auto body_start = request.find("\r\n\r\n");
+            std::string body = (body_start != std::string::npos)
+                ? request.substr(body_start + 4) : "";
+
+            std::lock_guard<std::mutex> lock(routes_mtx_);
+            for (const auto& [rm, rp, handler] : routes_) {
+                if (rm == method && base_path.rfind(rp, 0) == 0) {
+                    RouteResponse resp = handler(method, path, body);
+                    send_response(fd, resp.status, resp.content_type, resp.body);
+                    return;
                 }
             }
         }
-        send_response(fd, 200, "text/plain", "OK");
+
+        if (base_path == "/key") {
+            auto body_start = request.find("\r\n\r\n");
+            if (body_start != std::string::npos) {
+                std::string body     = request.substr(body_start + 4);
+                auto        key_pos  = body.find("\"key\"");
+                if (key_pos != std::string::npos) {
+                    auto colon = body.find(':', key_pos);
+                    if (colon != std::string::npos) {
+                        try {
+                            int key_code = std::stoi(body.substr(colon + 1));
+                            {
+                                std::lock_guard<std::mutex> lock(key_mtx_);
+                                keys_.push(key_code);
+                            }
+                            key_cv_.notify_one();
+                        } catch (...) {}
+                    }
+                }
+            }
+            send_response(fd, 200, "text/plain", "OK");
+        } else {
+            send_response(fd, 404, "text/plain", "Not Found");
+        }
     } else if (method == "OPTIONS") {
         // CORS preflight
         std::string headers =

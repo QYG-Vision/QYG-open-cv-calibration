@@ -3,16 +3,33 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <queue>
 #include <set>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <opencv2/core/mat.hpp>
 
 namespace qd {
+
+/**
+ * @brief 路由处理返回结构
+ */
+struct RouteResponse {
+    int         status       = 200;
+    std::string content_type = "application/json";
+    std::string body;
+};
+
+/// @brief 路由处理函数: (method, path, body) -> RouteResponse
+using RouteHandler = std::function<RouteResponse(
+    const std::string& method,
+    const std::string& path,
+    const std::string& body)>;
 
 /**
  * @brief 窗口运行时状态，供前端 HUD 面板展示
@@ -75,6 +92,17 @@ public:
     /// @brief 设置窗口运行时状态，供前端 HUD 轮询展示
     void setWindowStatus(const std::string& winname, const WindowStatus& status);
 
+    /// @brief 设置自定义 HTML 页面（替代默认的相机预览页面）
+    void setCustomPage(const std::string& html);
+
+    /// @brief 注册自定义 API 路由
+    /// @param method HTTP 方法 (GET/POST)
+    /// @param path 路径前缀 (如 "/api/config")，匹配时使用前缀匹配
+    /// @param handler 路由处理函数
+    void addRoute(const std::string& method,
+                  const std::string& path,
+                  RouteHandler handler);
+
     int port() const { return port_; }
 
 private:
@@ -112,6 +140,13 @@ private:
     std::set<int> active_fds_;
     std::mutex fds_mtx_;
     std::atomic<int> active_handlers_{0};
+
+    /// 自定义 HTML 页面（若为空则使用默认页面）
+    std::string custom_page_;
+
+    /// 自定义路由: "METHOD /prefix" -> handler
+    std::vector<std::tuple<std::string, std::string, RouteHandler>> routes_;
+    std::mutex routes_mtx_;
 };
 
 } // namespace qd
