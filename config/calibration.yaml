@@ -3,10 +3,10 @@ device: HIK
 # 相机标定参数 0:默认 0x00080: fix K3
 calibrateCamera_flags: 0x00080
 # 标定板类型 棋盘格： chessboard 对称圆： circles 非对称圆： acircles
-pattern: chessboard
-pattern_rows: 8 # 标定板行数（内角点数）
-pattern_cols: 8 # 标定板列数（内角点数）
-square_size: 35  # 标定板方格边长，单位：毫米
+pattern: circles
+pattern_rows: 7 # 标定板行数（内角点数）
+pattern_cols: 7 # 标定板列数（内角点数）
+square_size: 25  # 标定板方格边长，单位：毫米
 HIK:
   enable_frame_rate: false  # 是否锁帧
   frame_rate: 200           # 锁帧时的帧率
@@ -25,14 +25,14 @@ IMG:
   images_path: /home/qidian/images # 图像路径
 
 # 手眼标定和重投影误差用到的相机参数
-camera_matrix: [2374.800283232456, 0, 735.06179430972065, 0, 2375.6076189500459, 574.06058339146648, 0, 0, 1]
-distort_coeffs: [-0.03677891526705588, 0.1492051837742159, 0.001561300839571889, 0.001470933366848674, 0]
+camera_matrix: [1842.22, 0, 799.443, 0, 1841.54, 626.277, 0, 0, 1]
+distort_coeffs: [-0.0332343, 0.162749, 0.00137616, 0.000300167, 0]
 
 
 # 串口参数
 Serial:
   port_name: /dev/rm_usb0
-  baud_rate: 115200
+  baud_rate: 921600
 
 # 标定数据保存路径
 camera_calib_save_path: ./camera_calib_images  # 相机标定图片保存路径
