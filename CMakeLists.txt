@@ -97,6 +97,9 @@ if(BUILD_TESTING)
     set(TEST_DATA_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests/data)
 
     # ----- 单元测试 -----
+    add_executable(test_handeye_result tests/unit/test_handeye_result.cpp)
+    target_link_libraries(test_handeye_result PRIVATE gtest_main calibration_core)
+    gtest_discover_tests(test_handeye_result)
     # ThreadSafeQueue
     add_executable(test_thread_safe_queue tests/unit/test_thread_safe_queue.cpp)
     target_include_directories(test_thread_safe_queue PRIVATE ${PROJECT_SOURCE_DIR}/include)
@@ -114,7 +117,7 @@ if(BUILD_TESTING)
 
     add_executable(test_task_controller tests/unit/test_task_controller.cpp)
     target_compile_definitions(test_task_controller PRIVATE TEST_DATA_DIR="${TEST_DATA_DIR}")
-    target_link_libraries(test_task_controller PRIVATE gtest_main calibration_core)
+    target_link_libraries(test_task_controller PRIVATE gtest_main calibration_core util)
     gtest_discover_tests(test_task_controller)
 
     add_executable(test_serial_driver_shutdown tests/unit/test_serial_driver_shutdown.cpp)
@@ -166,7 +169,7 @@ if(BUILD_TESTING)
     target_link_libraries(test_handeye_offline
         PRIVATE
             gtest_main
-            yaml-cpp
+            calibration_core
     )
     gtest_discover_tests(test_handeye_offline
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}

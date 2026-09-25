@@ -291,6 +291,14 @@ std::string TaskController::start_task(TaskType type) {
     calibrate_ = std::make_unique<calibrate::Calibrate>(config_path_);
     calibrate_->set_auto_collect(auto_collect_);
 
+    // Validate the result before opening serial or advertising a running task.
+    if (type == TaskType::handeye_validation &&
+        !calibrate_->load_handeye_calibration("handeye_calibration.yaml")) {
+        error_message_ = "无法加载 handeye_calibration.yaml：请重新计算并检查结果格式、坐标系和单位";
+        set_state(TaskState::failed);
+        return error_message_;
+    }
+
     // 手眼任务需要先打开串口
     if (is_handeye_task(type)) {
         if (!open_serial()) {
@@ -453,10 +461,7 @@ void TaskController::process_frame(
             if (serial_) {
                 Eigen::Quaterniond q = serial_->read(timestamp);
                 calibrate_->collect_handeye(img, q, manual_collect);
-                calibrate_->show_collected_corners(img);
                 calibrate_->display_rpy(img, q);
-            } else {
-                calibrate_->show_collected_corners(img);
             }
             break;
         case TaskType::handeye_validation:
@@ -508,7 +513,7 @@ TaskSnapshot TaskController::build_snapshot() const {
     snap.task_type = task_type_str(task_type_);
     snap.state = state_str(state_);
     snap.phase = phase_;
-    snap.auto_collect = auto_collect_;
+    snap.auto_collect = task_type_ == TaskType::intrinsic_calibration && auto_collect_;
     snap.calibration_done = calibration_done_;
     snap.result_path = result_path_;
     snap.backup_path = backup_path_;
@@ -523,7 +528,8 @@ TaskSnapshot TaskController::build_snapshot() const {
     snap.old_camera_matrix_json = matx33_to_json(old_camera_matrix_);
     snap.old_distort_coeffs_json = mat_to_json(old_distort_coeffs_);
 
-    snap.sample_count = calibrate_->collected_camera_count();
+    snap.sample_count = task_type_ == TaskType::handeye_calibration
+        ? calibrate_->collected_handeye_count() : calibrate_->collected_camera_count();
 
     // 允许的动作
     switch (state_) {

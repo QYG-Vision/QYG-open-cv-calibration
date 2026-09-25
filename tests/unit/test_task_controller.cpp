@@ -4,8 +4,11 @@
 #include <opencv2/imgcodecs.hpp>
 #include <yaml-cpp/yaml.h>
 #include <unistd.h>
+#include <pty.h>
+#include <fstream>
 
 #include "task_controller.hpp"
+#include "handeye_result.hpp"
 
 #ifndef TEST_DATA_DIR
 #error TEST_DATA_DIR must be defined
@@ -31,12 +34,78 @@ std::string test_config_path() {
     return (std::filesystem::path(TEST_DATA_DIR) / "calibration_test.yaml").string();
 }
 
+TEST(TaskController, HandeyePreviewHasNoHistoricalCornersAndReportsRealCount) {
+    ScratchCwd temp;
+    struct Pty {
+        int master = -1, slave = -1;
+        char name[128]{};
+        ~Pty() { if (master >= 0) close(master); if (slave >= 0) close(slave); }
+    } pty;
+    ASSERT_EQ(openpty(&pty.master, &pty.slave, pty.name, nullptr, nullptr), 0);
+    auto config = YAML::LoadFile(test_config_path());
+    config["Serial"]["port_name"] = pty.name;
+    config["auto_collect_enabled"] = true;
+    const auto config_path = temp.scratch / "config.yaml";
+    { std::ofstream out(config_path); out << config; }
+    qd::TaskController controller(config_path.string(), temp.scratch.string());
+    controller.enqueue_start(qd::TaskType::handeye_calibration);
+    controller.drain_commands();
+    ASSERT_EQ(controller.snapshot().state, "running");
+    EXPECT_FALSE(controller.snapshot().auto_collect);
+    for (int count = 1; count <= 2; ++count) {
+        auto img = cv::imread(std::string(TEST_DATA_DIR) + "/handeye_calib_data/image_1.jpg");
+        ASSERT_FALSE(img.empty());
+        controller.render_frame(img, std::chrono::steady_clock::now(), true);
+        EXPECT_EQ(controller.snapshot().sample_count, count);
+        cv::Mat blank(img.size(), CV_8UC3, cv::Scalar::all(255));
+        controller.render_frame(blank, std::chrono::steady_clock::now());
+        const auto roi = blank(cv::Rect(0, 160, blank.cols, blank.rows - 160));
+        EXPECT_EQ(cv::norm(roi, cv::Mat(roi.size(), roi.type(), cv::Scalar::all(255)), cv::NORM_INF), 0);
+        EXPECT_EQ(controller.snapshot().sample_count, count);
+    }
+}
+
 TEST(TaskController, QueuedStartChangesStateOnlyWhenDrained) {
     qd::TaskController controller(test_config_path(), ".");
     controller.enqueue_start(qd::TaskType::intrinsic_calibration);
     EXPECT_EQ(controller.snapshot().state, "idle");
     controller.drain_commands();
     EXPECT_EQ(controller.snapshot().state, "running");
+}
+
+TEST(TaskController, MissingHandeyeResultFailsBeforeOpeningSerial) {
+    ScratchCwd temp;
+    qd::TaskController controller(test_config_path(), temp.scratch.string());
+    controller.enqueue_start(qd::TaskType::handeye_validation);
+    controller.drain_commands();
+    EXPECT_EQ(controller.snapshot().state, "failed");
+    EXPECT_FALSE(controller.snapshot().serial_enabled);
+    EXPECT_NE(controller.snapshot().error_message.find("handeye_calibration.yaml"), std::string::npos);
+}
+
+TEST(TaskController, ValidHandeyeResultIsLoadedBeforeValidationFrames) {
+    ScratchCwd temp;
+    struct Pty {
+        int master = -1, slave = -1;
+        char name[128]{};
+        ~Pty() { if (master >= 0) close(master); if (slave >= 0) close(slave); }
+    } pty;
+    ASSERT_EQ(openpty(&pty.master, &pty.slave, pty.name, nullptr, nullptr), 0);
+    auto config=YAML::LoadFile(test_config_path());
+    config["Serial"]["port_name"]=pty.name;
+    { std::ofstream out("config.yaml"); out << config; }
+    { std::ofstream out("handeye_calibration.yaml");
+      out << qd::calibrate::encode_handeye_result({cv::Mat::eye(3,3,CV_64F),cv::Mat::zeros(3,1,CV_64F)}); }
+    qd::TaskController controller("config.yaml",temp.scratch.string());
+    controller.enqueue_start(qd::TaskType::handeye_validation);
+    controller.drain_commands();
+    ASSERT_EQ(controller.snapshot().state,"running");
+    EXPECT_TRUE(controller.snapshot().serial_enabled);
+    cv::Mat actual(300,1000,CV_8UC3,cv::Scalar::all(255)), expected=actual.clone();
+    cv::putText(expected,"Board not detected",{11,35},cv::FONT_HERSHEY_SIMPLEX,.7,{0,0,0},4);
+    cv::putText(expected,"Board not detected",{11,35},cv::FONT_HERSHEY_SIMPLEX,.7,{255,255,255},1);
+    controller.render_frame(actual,std::chrono::steady_clock::now());
+    EXPECT_EQ(cv::norm(actual,expected,cv::NORM_INF),0);
 }
 
 TEST(TaskController, SnapshotIsSafeDuringQueuedStateChanges) {

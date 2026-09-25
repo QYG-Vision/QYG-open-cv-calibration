@@ -1,4 +1,5 @@
 #include "extrinsic_calibrator.hpp"
+#include "handeye_result.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -49,7 +50,6 @@ void ExtrinsicCalibrator::collect_handeye(Mat& img, const Eigen::Quaterniond& q,
     {
         this->rvecs_.push_back(rvec);
         this->tvecs_.push_back(tvec);
-        this->img_points_.push_back(pixel_points);
 
         Eigen::Matrix3d R_gimbal2world = q.toRotationMatrix();
         Eigen::Matrix3d R_world2gimbal = R_gimbal2world.transpose();
@@ -129,14 +129,7 @@ void ExtrinsicCalibrator::calibrate_handeye() {
     t_camera2gimbal = -R_camera2gimbal * t_gimbal2camera;
     t_board2world = -R_board2world * t_world2board;
 
-    Eigen::Matrix3d R_cameraRDU2gimbalFLU_eigen;
-    cv::cv2eigen(R_camera2gimbal, R_cameraRDU2gimbalFLU_eigen);
     const Eigen::Matrix3d R_flu2rdu { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } };
-
-    Eigen::Matrix3d R_cameraFLU2gimbalFLU =
-        R_cameraRDU2gimbalFLU_eigen * R_flu2rdu;
-    Eigen::Vector3d rpy =
-        eulers(Eigen::Quaterniond { R_cameraFLU2gimbalFLU }, 2, 1, 0) * 180 / M_PI;
 
     auto bx = t_board2world.at<double>(0);
     auto by = t_board2world.at<double>(1);
@@ -149,11 +142,10 @@ void ExtrinsicCalibrator::calibrate_handeye() {
         eulers(Eigen::Quaterniond { R_boardFLU2worldFLU }, 2, 1, 0) * 180 / M_PI;
 
     const auto handeye_rpy_range = calculate_handeye_rpy_range();
-    print_yaml(t_camera2gimbal, rpy, board_distance, board_ypr, handeye_rpy_range);
 
     saveHandEyeCalibrationYAML(
+        R_camera2gimbal,
         t_camera2gimbal,
-        rpy,
         board_distance,
         board_ypr,
         handeye_rpy_range,
@@ -161,184 +153,40 @@ void ExtrinsicCalibrator::calibrate_handeye() {
     );
 }
 
-void ExtrinsicCalibrator::print_yaml(
-    const cv::Mat& R_camera2gimbal,
-    const cv::Mat& t_camera2gimbal,
-    const Eigen::Vector3d& rpy
-) {
-    YAML::Emitter result;
-    std::vector<double> R_camera2gimbal_data(
-        R_camera2gimbal.begin<double>(),
-        R_camera2gimbal.end<double>()
-    );
-    std::vector<double> t_camera2gimbal_data(
-        t_camera2gimbal.begin<double>(),
-        t_camera2gimbal.end<double>()
-    );
-
-    result << YAML::BeginMap;
-    result << YAML::Newline;
-    result << YAML::Newline;
-    result << YAML::Comment(fmt::format(
-        "相机同理想情况的偏角: yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
-        rpy[2],
-        rpy[1],
-        rpy[0]
-    ));
-    result << YAML::Key << "R_camera2gimbal";
-    result << YAML::Value << YAML::Flow << R_camera2gimbal_data;
-    result << YAML::Key << "t_camera2gimbal";
-    result << YAML::Value << YAML::Flow << t_camera2gimbal_data;
-    result << YAML::Newline;
-    result << YAML::EndMap;
-
-    fmt::print("\n{}\n", result.c_str());
-}
-
-void ExtrinsicCalibrator::print_yaml(
-    const cv::Mat& t_camera2gimbal,
-    const Eigen::Vector3d& rpy,
-    double board_distance,
-    const Eigen::Vector3d& board_ypr,
-    const RpyRange& handeye_rpy_range
-) {
-    std::stringstream ss_xyz;
-    ss_xyz << std::fixed << std::setprecision(6);
-    for (int i = 0; i < 3; ++i) {
-        ss_xyz << t_camera2gimbal.at<double>(i) << (i == 2 ? "" : " ");
-    }
-
-    std::stringstream ss_rpy;
-    auto rpy_rad = rpy * M_PI / 180;
-    ss_rpy << std::fixed << std::setprecision(6);
-    ss_rpy << rpy_rad.x() << " " << rpy_rad.y() << " " << rpy_rad.z();
-
-    YAML::Emitter out;
-    out << YAML::BeginMap;
-    out << YAML::Key << "gimbal2camera";
-    out << YAML::Value << YAML::BeginMap;
-
-    out << YAML::Key << "xyz";
-    out << YAML::Value << "\"" + ss_xyz.str() + "\"";
-
-    out << YAML::Newline;
-    out << YAML::Comment(fmt::format(
-        "相机同理想情况的偏角: roll{:.2f} pitch{:.2f} yaw{:.2f} degree",
-        rpy[2],
-        rpy[1],
-        rpy[0]
-    ));
-    out << YAML::Key << "rpy";
-    out << YAML::Value << "\"" + ss_rpy.str() + "\"";
-
-    out << YAML::EndMap;
-
-    out << YAML::Newline;
-    out << YAML::Comment(fmt::format(
-        "标定板到世界坐标系原点的水平距离: {:.2f} m", board_distance));
-    out << YAML::Newline;
-    out << YAML::Comment(fmt::format(
-        "标定板同竖直摆放时的偏角(gimbal2camera/FLU): yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
-        board_ypr[0], board_ypr[1], board_ypr[2]));
-
-    out << YAML::EndMap;
-
-    if (handeye_rpy_range.valid) {
-        fmt::print(
-            "{}\n"
-            "# rpy 旋转范围 degree:\n"
-            "#   roll: [{:.2f}, {:.2f}]\n"
-            "#   pitch: [{:.2f}, {:.2f}]\n"
-            "#   yaw: [{:.2f}, {:.2f}]\n"
-            "# 标定数量: {}\n",
-            out.c_str(),
-            handeye_rpy_range.min_ypr_deg[2],
-            handeye_rpy_range.max_ypr_deg[2],
-            handeye_rpy_range.min_ypr_deg[1],
-            handeye_rpy_range.max_ypr_deg[1],
-            handeye_rpy_range.min_ypr_deg[0],
-            handeye_rpy_range.max_ypr_deg[0],
-            handeye_ypr_deg_list_.size()
-        );
-        return;
-    }
-
-    std::cout << out.c_str() << std::endl;
-}
-
 void ExtrinsicCalibrator::saveHandEyeCalibrationYAML(
+    const cv::Mat& rotation,
     const cv::Mat& xyz_m,
-    const Eigen::Vector3d& rpy,
     double board_distance,
     const Eigen::Vector3d& board_ypr,
     const RpyRange& handeye_rpy_range,
     const std::string& filename
 ) {
-    std::stringstream ss_xyz;
-    ss_xyz << std::fixed << std::setprecision(6);
-    for (int i = 0; i < 3; ++i) {
-        ss_xyz << xyz_m.at<double>(i) << (i == 2 ? "" : " ");
-    }
-
-    std::stringstream ss_rpy;
-    auto rpy_rad = rpy * M_PI / 180;
-    ss_rpy << std::fixed << std::setprecision(6);
-    ss_rpy << rpy_rad.x() << " " << rpy_rad.y() << " " << rpy_rad.z();
-
-    YAML::Emitter out;
-    out << YAML::BeginMap;
-    out << YAML::Key << "gimbal2camera";
-    out << YAML::Value << YAML::BeginMap;
-
-    out << YAML::Key << "xyz";
-    out << YAML::Value << "\"" + ss_xyz.str() + "\"";
-
-    out << YAML::Newline;
-    out << YAML::Comment(fmt::format(
-        "相机同理想情况的偏角: roll{:.2f} pitch{:.2f} yaw{:.2f} degree",
-        rpy[2],
-        rpy[1],
-        rpy[0]
-    ));
-    out << YAML::Key << "rpy";
-    out << YAML::Value << "\"" + ss_rpy.str() + "\"";
-
-    out << YAML::EndMap;
-
-    out << YAML::Newline;
-    out << YAML::Comment(fmt::format(
-        "标定板到世界坐标系原点的水平距离: {:.2f} m", board_distance));
-    out << YAML::Newline;
-    out << YAML::Comment(fmt::format(
-        "标定板同竖直摆放时的偏角(gimbal2camera/FLU): yaw{:.2f} pitch{:.2f} roll{:.2f} degree",
-        board_ypr[0], board_ypr[1], board_ypr[2]));
-
-    out << YAML::EndMap;
-
-    std::ofstream fout(filename);
-    fout << out.c_str();
-
+    std::string text = encode_handeye_result({rotation, xyz_m});
+    text += fmt::format(
+        "# Board horizontal distance: {:.6f} m\n"
+        "# Board YPR (FLU): {:.6f} {:.6f} {:.6f} degree\n"
+        "# Sample count: {}\n",
+        board_distance, board_ypr[0], board_ypr[1], board_ypr[2], collected_count_);
     if (handeye_rpy_range.valid) {
-        fout << fmt::format(
-            "\n# rpy 旋转范围 degree:\n"
-            "#   roll: [{:.2f}, {:.2f}]\n"
-            "#   pitch: [{:.2f}, {:.2f}]\n"
-            "#   yaw: [{:.2f}, {:.2f}]\n"
-            "# 标定数量: {}\n",
-            handeye_rpy_range.min_ypr_deg[2],
-            handeye_rpy_range.max_ypr_deg[2],
-            handeye_rpy_range.min_ypr_deg[1],
-            handeye_rpy_range.max_ypr_deg[1],
-            handeye_rpy_range.min_ypr_deg[0],
-            handeye_rpy_range.max_ypr_deg[0],
-            handeye_ypr_deg_list_.size()
-        );
+        text += fmt::format(
+            "# Gimbal rotation range (degree):\n"
+            "#   roll: [{:.6f}, {:.6f}]\n"
+            "#   pitch: [{:.6f}, {:.6f}]\n"
+            "#   yaw: [{:.6f}, {:.6f}]\n",
+            handeye_rpy_range.min_ypr_deg[2], handeye_rpy_range.max_ypr_deg[2],
+            handeye_rpy_range.min_ypr_deg[1], handeye_rpy_range.max_ypr_deg[1],
+            handeye_rpy_range.min_ypr_deg[0], handeye_rpy_range.max_ypr_deg[0]);
     }
-
-    fout << "\n";
-    fout.close();
-
-    std::cout << "手眼标定结果已保存到 " << filename << std::endl;
+    // Finish and check the new file before replacing a previously valid result.
+    const auto temporary = filename + ".tmp";
+    std::ofstream file(temporary, std::ios::trunc);
+    file << text;
+    file.flush();
+    if (!file) throw std::runtime_error("Cannot write handeye result: " + temporary);
+    file.close();
+    if (file.fail()) throw std::runtime_error("Cannot close handeye result: " + temporary);
+    std::filesystem::rename(temporary, filename);
+    std::cout << text << "手眼标定结果已保存到 " << filename << std::endl;
 }
 
 RpyRange ExtrinsicCalibrator::calculate_handeye_rpy_range() const {
@@ -359,16 +207,9 @@ RpyRange ExtrinsicCalibrator::calculate_handeye_rpy_range() const {
     return range;
 }
 
-void ExtrinsicCalibrator::show_collected_corners(cv::Mat& img) {
-    for (auto& corners: this->img_points_) {
-        cv::drawChessboardCorners(img, this->paramer_.boardSize, Mat(corners), true);
-    }
-}
-
 bool ExtrinsicCalibrator::load_handeye_data_from_folder(const std::string& folder_path) {
     rvecs_.clear();
     tvecs_.clear();
-    img_points_.clear();
     R_world2gimbal_list_.clear();
     t_world2gimbal_list_.clear();
     handeye_ypr_deg_list_.clear();
@@ -471,7 +312,6 @@ bool ExtrinsicCalibrator::load_handeye_data_from_folder(const std::string& folde
 
         this->rvecs_.push_back(rvec);
         this->tvecs_.push_back(tvec);
-        this->img_points_.push_back(pixel_points);
 
         Eigen::Matrix3d R_gimbal2world = q.toRotationMatrix();
         Eigen::Matrix3d R_world2gimbal = R_gimbal2world.transpose();

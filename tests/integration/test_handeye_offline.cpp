@@ -6,6 +6,7 @@
 #include <random>
 #include <string>
 #include <yaml-cpp/yaml.h>
+#include "handeye_result.hpp"
 
 namespace fs = std::filesystem;
 
@@ -66,18 +67,37 @@ protected:
         // Use the config file from tests/data/
         config_path_ = fs::path(TEST_DATA_DIR) / "calibration_test.yaml";
         data_path_   = fs::path(TEST_DATA_DIR) / "handeye_calib_data";
-        output_dir_  = fs::path(TEST_DATA_DIR) / "test_output";
+        previous_dir_ = fs::current_path();
+        output_dir_ = unique_temp_name("_cwd");
+        fs::create_directories(output_dir_);
+        fs::current_path(output_dir_);
     }
 
     void TearDown() override {
         // Clean up test output to keep the test data directory clean
+        fs::current_path(previous_dir_);
         fs::remove_all(output_dir_);
     }
 
+    fs::path previous_dir_;
     fs::path config_path_;
     fs::path data_path_;
     fs::path output_dir_;
 };
+
+TEST_F(HandEyeOfflineTest, WriteFailureDoesNotReplacePreviousResultOrReportSuccess) {
+    const std::string previous = "previous-result-must-survive\n";
+    { std::ofstream out("handeye_calibration.yaml"); out << previous; }
+    fs::create_directory("handeye_calibration.yaml.tmp");
+    std::string out, err;
+    const int ret = run_handeye("--config-path=" + config_path_.string() +
+        " --load-data=1 --data-path=" + data_path_.string(), out, err);
+    EXPECT_EQ(ret,1) << err;
+    EXPECT_EQ(out.find("标定完成，程序退出"),std::string::npos);
+    std::ifstream file("handeye_calibration.yaml");
+    const std::string contents{std::istreambuf_iterator<char>(file),std::istreambuf_iterator<char>()};
+    EXPECT_EQ(contents,previous);
+}
 
 // ---- 离线模式： -l -d <path> ----
 TEST_F(HandEyeOfflineTest, OfflineWithShortFlags) {
@@ -119,26 +139,15 @@ TEST_F(HandEyeOfflineTest, OutputYamlGeneratedInIsolatedDir) {
     int ret = run_handeye(args, stdout_str, stderr_str);
     EXPECT_EQ(ret, 0) << "stderr:\n" << stderr_str;
 
-    // The test calibration_test.yaml defines handeye_calib_save_path as
-    // "./test_output/handeye_calib_data" — which resolves relative to the
-    // config file (tests/data/), so the output goes to
-    // tests/data/test_output/handeye_calib_data/
-    fs::path expected_save = output_dir_ / "handeye_calib_data";
-    fs::path expected_yaml = output_dir_ / "handeye_calib_data" / ".." / ".." / ".." / "handeye_calibration.yaml";
-
-    // Actually, the handeye result YAML is hardcoded as "handeye_calibration.yaml"
-    // saved relative to CWD. Let's check the CWD-relative file:
-    // Since we run from the build dir, it would be build/handeye_calibration.yaml
-    // We should check it exists and then clean up.
-
-    // The YAML output goes to CWD/handeye_calibration.yaml. Let's check for it:
-    // (This is acceptable as a side-effect of the integration test.)
-
-    // Verify the output file exists and contains expected keys
-
-    // Actually, the save path for handeye calibration is hardcoded "handeye_calibration.yaml"
-    // Let's not check CWD pollution since we clean up in TearDown anyway.
-    // The key point is that tests/data is an input-only directory not modified.
+    const auto result_path = output_dir_ / "handeye_calibration.yaml";
+    ASSERT_TRUE(fs::exists(result_path));
+    const auto node = YAML::LoadFile(result_path.string());
+    ASSERT_TRUE(node["format_version"]);
+    EXPECT_EQ(node["format_version"].as<int>(), 2);
+    EXPECT_EQ(node["R_camera2gimbal"].size(), 9);
+    EXPECT_EQ(node["t_camera2gimbal"].size(), 3);
+    EXPECT_EQ(node["t_camera2gimbal_unit"].as<std::string>(), "m");
+    EXPECT_NO_THROW(qd::calibrate::decode_handeye_result(node));
 }
 
 // ---- gimbal2camera 字段验证 ----

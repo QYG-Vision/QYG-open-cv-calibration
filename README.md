@@ -259,6 +259,32 @@ handeye_calib_save_path: ./handeye_calib_data
 
 `calibrationWorkbench` 同时提供页面按钮，很多操作不必依赖键盘；但浏览器页面仍需要焦点，快捷键才会生效。
 
+### 手眼结果的单位与 QD 坐标约定
+
+手眼采集是**手动采集**：固定标定板和云台底座，改变云台 yaw/pitch，停稳后点击“采集”，
+观察样本数递增。预览只显示当前帧的角点，不再叠画历史角点。采集结束点击“开始计算”；
+`handeye_calib_data` 中的图像/姿态是原始样本，求解结果为启动目录下的 `handeye_calibration.yaml`。
+
+结果文件 `format_version: 2` 同时包含：
+
+- `R_camera2gimbal`：行优先的 9 个完整 double 精度数值，相机光学系（右、下、前）到云台系（前、左、上）。
+- `t_camera2gimbal`：3 个平移数值，`t_camera2gimbal_unit: m`。
+- `gimbal2camera.xyz/rpy`：可手动复制到 QD `launch_params.yaml` 的配置。
+  对应 TF parent=`gimbal_link`、child=`camera_link`；xyz 为 m，rpy 为 **roll pitch yaw，rad**。
+  已计入 camera_link 与 optical 系之间的固定旋转，不应再额外翻转 pitch。
+  字符串内嵌引号是为 QD 的 xacro 命令参数保留的；直接编辑 URDF 的 `origin` 时只使用引号内的数字。
+
+矩阵满足 `p_gimbal = R_camera2gimbal * p_camera_optical + t_camera2gimbal`，两侧坐标均为 m。
+数值以 17 位有效数字保存；这避免存储截断，但不代表测量具有 17 位精度。
+标定板尺寸配置与内部 PnP 仍为 mm，内参重投影和手眼验证的距离/平移/标准差显示统一为 m。
+
+“手眼验证”会先加载结果并检查版本、坐标系、单位、有限值和旋转合法性；同时提供矩阵与 RPY 时会核对一致性。
+画面采用英文提示，避免 OpenCV 字体显示问号。验证时保持标定板和底座不动，转动云台观察世界位置的一致性；
+原有 0.01/0.02 阈值按 m 比较，它们只是显示提示，不是精度验收保证。
+旧版显式 `R_camera2gimbal/t_camera2gimbal` 矩阵仍支持（平移按 m）；
+仅有 `gimbal2camera`、没有版本号的旧文件因 RPY 顺序存在歧义，需要由原始数据离线重算。
+本仓库不会自动修改 QD 机器人配置。
+
 ## 常见问题
 
 - **浏览器无画面**：确认程序已启动，查看终端日志中 WebViewer 输出的地址列表，本机访问 `http://localhost:8080`

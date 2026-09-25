@@ -423,9 +423,8 @@ public:
     /// @return true 加载并标定成功
     bool load_handeye_data_from_folder(const std::string& folder_path);
 
-    /// @brief 在图像上叠绘所有已采集的手眼标定角点
-    /// @param img 输入/输出图像
-    void show_collected_corners(cv::Mat& img);
+    /// @brief 当前已采集或离线加载的有效手眼样本数
+    int collected_handeye_count() const;
 
     /// @brief 可视化云台 / 下位机欧拉角 (yaw/pitch/roll)
     /// @param img 输入/输出图像

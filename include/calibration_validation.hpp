@@ -32,17 +32,17 @@ public:
     void display_error(cv::Mat& img);
 
     /// @brief 从 YAML 文件加载手眼标定结果
-    /// @details 支持两种格式:
-    ///          - 新格式: gimbal2camera { xyz: "...", rpy: "..." }
-    ///          - 旧格式: R_camera2gimbal / t_camera2gimbal (向后兼容)
+    /// @details 支持 version 2 全精度矩阵/QD RPY，以及旧版显式 R/t（m）。
+    ///          拒绝未声明版本的歧义 RPY；失败重载会清除旧结果及统计。
     /// @param handeye_yaml_path 手眼标定结果 YAML 文件路径
     /// @return true 加载成功
     bool load_handeye_calibration(const std::string& handeye_yaml_path);
 
     /// @brief 在线验证手眼标定准确性 (位置一致性法)
     /// @details 固定标定板，旋转云台, 通过 T_board2world = T_gimbal2world * T_camera2gimbal * T_board2camera
-    ///          计算标定板在世界坐标系下的位置，统计多帧位置标准差作为一致性指标。
-    ///          若未调用 load_handeye_calibration，直接显示"未加载"提示。
+    ///          计算首个圆点 O 在世界坐标系下的位置，统计多帧位置标准差作为一致性指标。
+    ///          画面分别显示 ROS TF 与抬头为正的云台 pitch、O 的 XYZ/YPD、以及板正面 FLU 姿态；
+    ///          PnP 点定义不变。若未调用 load_handeye_calibration，直接显示"未加载"提示。
     /// @param img 输入/输出图像
     /// @param gimbal_quaternion 云台当前姿态四元数
     void validate_handeye(cv::Mat& img, const Eigen::Quaterniond& gimbal_quaternion);

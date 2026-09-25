@@ -58,7 +58,7 @@ header .info span{color:#6c7086}header .info strong{color:#cdd6f4}
             justify-content:center;position:relative;background:#11111b;min-height:300px}
 #video-area img{max-width:100%;max-height:100%;object-fit:contain}
 #video-area .placeholder{color:#6c7086;font-size:14px}
-.stream-overlay{position:absolute;top:8px;left:12px;font-size:13px;color:#a6e3a1;
+.stream-overlay{position:absolute;top:16px;left:12px;font-size:13px;color:#a6e3a1;
                 background:rgba(0,0,0,.6);padding:3px 8px;border-radius:4px}
 
 #action-bar{display:flex;gap:6px;padding:8px 12px;background:#181825;border-top:1px solid #313244;
@@ -480,7 +480,9 @@ function updateUI() {
     document.getElementById('stream-hud').textContent = '等待任务启动';
   } else {
     document.getElementById('stream-hud').textContent =
-      '阶段: '+esc(session.phase)+' | 样本: '+session.sample_count+'/'+session.goodenough_samples+
+      '阶段: '+session.phase+' | 样本: '+session.sample_count+
+      (session.task_type === 'intrinsic_calibration' ? '/'+session.goodenough_samples : '')+
+      (session.task_type === 'handeye_calibration' ? ' | 手动采集' : '')+
       (session.auto_collect ? ' | 自动采集中' : '');
   }
 
@@ -495,7 +497,10 @@ function updateUI() {
 
   // auto collect button text
   const ab = document.getElementById('act-auto');
-  if (ab) ab.textContent = session.auto_collect ? '自动采集:开' : '自动采集:关';
+  if (ab) {
+    ab.hidden = session.task_type !== 'intrinsic_calibration';
+    ab.textContent = session.auto_collect ? '自动采集:开' : '自动采集:关';
+  }
 
   // task cards
   document.getElementById('btn-start').disabled = !(session.state === 'idle' ||

@@ -48,9 +48,8 @@ public:
     /// @return true 至少加载到 1 组有效数据
     bool load_handeye_data_from_folder(const std::string& folder_path);
 
-    /// @brief 在图像上叠绘所有已采集的手眼标定角点
-    /// @param img 输入/输出图像
-    void show_collected_corners(cv::Mat& img);
+    /// @brief 当前已采集或离线加载的有效手眼样本数
+    int collected_count() const { return collected_count_; }
 
     /// @brief 在图像左上角显示云台 yaw/pitch/roll 欧拉角
     /// @param img 输入/输出图像
@@ -79,9 +78,6 @@ private:
     /// 下位机姿态欧拉角记录 (yaw, pitch, roll) 度
     std::vector<Eigen::Vector3d> handeye_ypr_deg_list_;
 
-    /// 已采集标定角点缓存 (供 show_collected_corners 叠绘)
-    std::vector<std::vector<cv::Point2f>> img_points_;
-
     int         collected_count_ = 0;
     std::string handeye_calib_save_path_;
 
@@ -90,21 +86,9 @@ private:
     /// @brief 统计参与标定的下位机 RPY 姿态角范围
     RpyRange calculate_handeye_rpy_range() const;
 
-    /// @brief 终端输出 R_camera2gimbal / t_camera2gimbal (旧格式)
-    void print_yaml(const cv::Mat& R_camera2gimbal,
-                    const cv::Mat& t_camera2gimbal,
-                    const Eigen::Vector3d& rpy);
-
-    /// @brief 终端输出 gimbal2camera 格式手眼结果 (带注释)
-    void print_yaml(const cv::Mat& t_camera2gimbal,
-                    const Eigen::Vector3d& rpy,
-                    double board_distance,
-                    const Eigen::Vector3d& board_ypr,
-                    const RpyRange& handeye_rpy_range);
-
-    /// @brief 保存手眼标定结果 YAML (gimbal2camera 注释式格式)
-    void saveHandEyeCalibrationYAML(const cv::Mat& xyz_m,
-                                    const Eigen::Vector3d& rpy,
+    /// @brief 保存完整精度 optical→gimbal 矩阵及 QD camera_link XYZ/RPY。
+    void saveHandEyeCalibrationYAML(const cv::Mat& rotation,
+                                    const cv::Mat& xyz_m,
                                     double board_distance,
                                     const Eigen::Vector3d& board_ypr,
                                     const RpyRange& handeye_rpy_range,

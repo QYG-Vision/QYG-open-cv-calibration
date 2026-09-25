@@ -1,5 +1,6 @@
 #include "calibration_validation.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fmt/core.h>
@@ -8,8 +9,29 @@
 #include <opencv2/core/mat.hpp>
 
 #include "reprojection_validation.hpp"
+#include "handeye_result.hpp"
 
 namespace qd::calibrate {
+
+namespace {
+double clean_display_zero(double value) {
+    return std::abs(value) < 0.005 ? 0.0 : value;
+}
+
+void draw_handeye_text(cv::Mat& img, const std::string& text, cv::Point baseline,
+                       double scale, int max_width) {
+    const int requested_width = cv::getTextSize(
+        text, cv::FONT_HERSHEY_SIMPLEX, scale, 2, nullptr).width;
+    if (requested_width > max_width && requested_width > 0)
+        scale *= static_cast<double>(max_width) / requested_width;
+    const int outline = std::max(3, static_cast<int>(std::lround(5 * scale)));
+    const int fill = std::max(1, static_cast<int>(std::lround(2 * scale)));
+    cv::putText(img, text, baseline, cv::FONT_HERSHEY_SIMPLEX, scale,
+                cv::Scalar(0, 0, 0), outline);
+    cv::putText(img, text, baseline, cv::FONT_HERSHEY_SIMPLEX, scale,
+                cv::Scalar(255, 255, 255), fill);
+}
+}
 
 CalibrationValidation::CalibrationValidation(
     const Paramer& paramer,
@@ -92,10 +114,10 @@ void CalibrationValidation::display_error(cv::Mat& img) {
     cv::putText(
         img,
         fmt::format(
-            "tvec: {:.2f} {:.2f} {:.2f}",
-            tvec64.at<double>(0),
-            tvec64.at<double>(1),
-            tvec64.at<double>(2)
+            "tvec: {:.3f} {:.3f} {:.3f} m",
+            tvec64.at<double>(0) / 1000.0,
+            tvec64.at<double>(1) / 1000.0,
+            tvec64.at<double>(2) / 1000.0
         ),
         { 40, 80 },
         cv::FONT_HERSHEY_SIMPLEX,
@@ -105,7 +127,7 @@ void CalibrationValidation::display_error(cv::Mat& img) {
     );
     cv::putText(
         img,
-        fmt::format("norm: {:.2f}", cv::norm(tvec)),
+        fmt::format("norm: {:.3f} m", cv::norm(tvec) / 1000.0),
         { 40, 120 },
         cv::FONT_HERSHEY_SIMPLEX,
         1.0,
@@ -121,82 +143,18 @@ void CalibrationValidation::display_error(cv::Mat& img) {
 }
 
 bool CalibrationValidation::load_handeye_calibration(const std::string& handeye_yaml_path) {
+    handeye_loaded_ = false;
+    R_camera2gimbal_.release();
+    t_camera2gimbal_.release();
+    reset_validation_stats();
     try {
-        auto yaml = YAML::LoadFile(handeye_yaml_path);
-
-        // ---- 新格式: gimbal2camera { xyz: "…", rpy: "…" } ----
-        if (yaml["gimbal2camera"]) {
-            const auto gc = yaml["gimbal2camera"];
-
-            if (!gc["xyz"] || !gc["rpy"]) {
-                std::cerr << "gimbal2camera 格式缺少 xyz 或 rpy" << std::endl;
-                return false;
-            }
-
-            std::string xyz_str = gc["xyz"].as<std::string>();
-            std::istringstream xyz_ss(xyz_str);
-            double x, y, z;
-            if (!(xyz_ss >> x >> y >> z)) {
-                std::cerr << "无法解析 gimbal2camera.xyz" << std::endl;
-                return false;
-            }
-            t_camera2gimbal_ = (cv::Mat_<double>(3, 1) << x, y, z) * 1e3; // m -> mm
-
-            std::string rpy_str = gc["rpy"].as<std::string>();
-            std::istringstream rpy_ss(rpy_str);
-            double yaw, pitch, roll;
-            if (!(rpy_ss >> yaw >> pitch >> roll)) {
-                std::cerr << "无法解析 gimbal2camera.rpy" << std::endl;
-                return false;
-            }
-
-            Eigen::Matrix3d R_cameraFLU2gimbalFLU =
-                (Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ())
-                 * Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY())
-                 * Eigen::AngleAxisd(roll, Eigen::Vector3d::UnitX()))
-                    .toRotationMatrix();
-
-            Eigen::Matrix3d R_flu2rdu_inv;
-            R_flu2rdu_inv << 0,  0, 1,
-                           -1,  0, 0,
-                            0, -1, 0;
-            Eigen::Matrix3d R_cam2gimbal_eigen = R_cameraFLU2gimbalFLU * R_flu2rdu_inv;
-            cv::eigen2cv(R_cam2gimbal_eigen, R_camera2gimbal_);
-
-            std::cout << "gimbal2camera xyz parsed: " << x << " " << y << " " << z << " (m)" << std::endl;
-            std::cout << "gimbal2camera rpy parsed: " << yaw << " " << pitch << " " << roll << " (rad)" << std::endl;
-        }
-        // ---- 旧格式: R_camera2gimbal / t_camera2gimbal (向后兼容) ----
-        else if (yaml["R_camera2gimbal"]) {
-            auto R_data = yaml["R_camera2gimbal"].as<std::vector<double>>();
-            if (R_data.size() == 9) {
-                R_camera2gimbal_ = cv::Mat(3, 3, CV_64F, R_data.data()).clone();
-            } else {
-                std::cerr << "R_camera2gimbal数据格式错误，需要9个元素" << std::endl;
-                return false;
-            }
-
-            if (yaml["t_camera2gimbal"]) {
-                auto t_data = yaml["t_camera2gimbal"].as<std::vector<double>>();
-                if (t_data.size() == 3) {
-                    t_camera2gimbal_ = cv::Mat(3, 1, CV_64F, t_data.data()).clone() * 1e3;
-                } else {
-                    std::cerr << "t_camera2gimbal数据格式错误，需要3个元素" << std::endl;
-                    return false;
-                }
-            } else {
-                std::cerr << "YAML文件中未找到t_camera2gimbal" << std::endl;
-                return false;
-            }
-        } else {
-            std::cerr << "YAML 中未找到 gimbal2camera 或 R_camera2gimbal" << std::endl;
-            return false;
-        }
-
+        const auto result = decode_handeye_result(YAML::LoadFile(handeye_yaml_path));
+        R_camera2gimbal_ = result.rotation;
+        t_camera2gimbal_ = result.translation_m * 1000.0; // internal PnP geometry is mm
         handeye_loaded_ = true;
-        std::cout << "手眼标定结果加载成功！" << std::endl;
-        std::cout << "R_camera2gimbal:\n" << R_camera2gimbal_ << std::endl;
-        std::cout << "t_camera2gimbal:\n" << t_camera2gimbal_ << std::endl;
+        std::cout << "手眼标定结果加载成功: " << handeye_yaml_path
+                  << "\nR_camera2gimbal:\n" << R_camera2gimbal_
+                  << "\nt_camera2gimbal (m):\n" << result.translation_m << std::endl;
         return true;
     } catch (const std::exception& e) {
         std::cerr << "加载手眼标定结果失败: " << e.what() << std::endl;
@@ -206,252 +164,198 @@ bool CalibrationValidation::load_handeye_calibration(const std::string& handeye_
 
 void CalibrationValidation::validate_handeye(cv::Mat& img,
                                               const Eigen::Quaterniond& gimbal_quaternion) {
+    const double layout_scale = std::min(img.cols / 1440.0, img.rows / 1080.0);
+    const int margin = std::max(8, static_cast<int>(std::lround(40 * layout_scale)));
+    const int top = std::max(35, static_cast<int>(std::lround(100 * layout_scale)));
+    const int right = img.cols / 2 + margin;
+    const int left_width = std::max(1, img.cols / 2 - 2 * margin);
+    const int right_width = std::max(1, img.cols - right - margin);
+    const auto left_text = [&](const std::string& line, int reference_y) {
+        draw_handeye_text(img, line, {margin, static_cast<int>(std::lround(reference_y * layout_scale))},
+                          layout_scale, left_width);
+    };
+    const auto right_text = [&](const std::string& line, int reference_y) {
+        draw_handeye_text(img, line, {right, static_cast<int>(std::lround(reference_y * layout_scale))},
+                          layout_scale, right_width);
+    };
+    const auto error_text = [&](const std::string& line) {
+        draw_handeye_text(img, line, {margin, top}, std::max(0.7, layout_scale),
+                          img.cols - 2 * margin);
+    };
     if (!handeye_loaded_) {
-        cv::putText(
-            img,
-            "手眼标定结果未加载！",
-            { 40, 40 },
-            cv::FONT_HERSHEY_SIMPLEX,
-            1.0,
-            { 0, 0, 255 },
-            2
-        );
+        error_text("Handeye result not loaded");
         return;
     }
 
-    std::vector<Point2f> pixel_points;
-    vector<Point3f> object_points;
-    auto found = detect_board(paramer_, img, pixel_points, object_points);
-    if (!found) {
-        cv::putText(
-            img,
-            "未检测到标定板",
-            { 40, 40 },
-            cv::FONT_HERSHEY_SIMPLEX,
-            1.0,
-            { 0, 0, 255 },
-            2
-        );
-        return;
-    }
+    const auto fail = [&error_text]() {
+        error_text("PnP failed");
+    };
+    try {
+        if (!gimbal_quaternion.coeffs().allFinite() || gimbal_quaternion.norm() < 1e-12 ||
+            !cv::checkRange(cv::Mat(camera_matrix_)) || camera_matrix_(0,0) <= 0 ||
+            camera_matrix_(1,1) <= 0 || distort_coeffs_.empty() || !cv::checkRange(distort_coeffs_)) {
+            fail();
+            return;
+        }
+        std::vector<Point2f> pixel_points;
+        vector<Point3f> object_points;
+        auto found = detect_board(paramer_, img, pixel_points, object_points);
+        if (!found) {
+            error_text("Board not detected");
+            return;
+        }
 
-    cv::Mat rvec_board2camera, tvec_board2camera;
-    if (!cv::solvePnP(
+        cv::Mat rvec_board2camera, tvec_board2camera;
+        if (!cv::solvePnP(
+                object_points,
+                pixel_points,
+                this->camera_matrix_,
+                this->distort_coeffs_,
+                rvec_board2camera,
+                tvec_board2camera,
+                false,
+                cv::SOLVEPNP_IPPE
+            ) || !is_finite_pose_vector(rvec_board2camera) || !is_finite_pose_vector(tvec_board2camera))
+        {
+            fail();
+            return;
+        }
+
+        cv::Mat R_board2camera;
+        cv::Rodrigues(rvec_board2camera, R_board2camera);
+
+        cv::Mat R_board2gimbal = R_camera2gimbal_ * R_board2camera;
+        cv::Mat t_board2gimbal = R_camera2gimbal_ * tvec_board2camera + t_camera2gimbal_;
+
+        Eigen::Matrix3d R_gimbal2world = gimbal_quaternion.normalized().toRotationMatrix();
+        cv::Mat R_gimbal2world_cv;
+        cv::eigen2cv(R_gimbal2world, R_gimbal2world_cv);
+
+        cv::Mat R_board2world = R_gimbal2world_cv * R_board2gimbal;
+        cv::Mat t_board2world =
+            R_gimbal2world_cv * t_board2gimbal;
+
+        if (!is_finite_pose_vector(t_board2world)) { fail(); return; }
+
+        std::vector<cv::Point2f> reprojected_points;
+        cv::projectPoints(
             object_points,
-            pixel_points,
-            this->camera_matrix_,
-            this->distort_coeffs_,
             rvec_board2camera,
             tvec_board2camera,
-            false,
-            cv::SOLVEPNP_IPPE
-        ))
-    {
-        cv::putText(
-            img,
-            "PnP求解失败",
-            { 40, 40 },
-            cv::FONT_HERSHEY_SIMPLEX,
-            1.0,
-            { 0, 0, 255 },
-            2
+            this->camera_matrix_,
+            this->distort_coeffs_,
+            reprojected_points
         );
-        return;
-    }
+        if (reprojected_points.size() != pixel_points.size() ||
+            !are_finite_image_points(reprojected_points)) { fail(); return; }
+        double reprojection_error = calculate_reprojection_error(pixel_points, reprojected_points);
 
-    cv::Mat R_board2camera;
-    cv::Rodrigues(rvec_board2camera, R_board2camera);
 
-    cv::Mat R_board2gimbal = R_camera2gimbal_ * R_board2camera;
-    cv::Mat t_board2gimbal = R_camera2gimbal_ * tvec_board2camera + t_camera2gimbal_;
-
-    Eigen::Matrix3d R_gimbal2world = gimbal_quaternion.toRotationMatrix();
-    cv::Mat R_gimbal2world_cv;
-    cv::eigen2cv(R_gimbal2world, R_gimbal2world_cv);
-
-    cv::Mat R_board2world = R_gimbal2world_cv * R_board2gimbal;
-    cv::Mat t_board2world =
-        R_gimbal2world_cv * t_board2gimbal;
-
-    world_positions_history_.push_back(t_board2world.clone());
-    if (world_positions_history_.size() > 100) {
-        world_positions_history_.erase(world_positions_history_.begin());
-    }
-
-    double position_std = 0.0;
-    if (world_positions_history_.size() > 1) {
-        cv::Mat mean_pos = cv::Mat::zeros(3, 1, CV_64F);
-        for (const auto& pos: world_positions_history_) {
-            mean_pos += pos;
+        world_positions_history_.push_back(t_board2world.clone());
+        if (world_positions_history_.size() > 100) {
+            world_positions_history_.erase(world_positions_history_.begin());
         }
-        mean_pos /= world_positions_history_.size();
 
-        double variance = 0.0;
-        for (const auto& pos: world_positions_history_) {
-            cv::Mat diff = pos - mean_pos;
-            variance += cv::norm(diff) * cv::norm(diff);
+        double position_std = 0.0;
+        if (world_positions_history_.size() > 1) {
+            cv::Mat mean_pos = cv::Mat::zeros(3, 1, CV_64F);
+            for (const auto& pos: world_positions_history_) {
+                mean_pos += pos;
+            }
+            mean_pos /= world_positions_history_.size();
+
+            double variance = 0.0;
+            for (const auto& pos: world_positions_history_) {
+                cv::Mat diff = pos - mean_pos;
+                variance += cv::norm(diff) * cv::norm(diff);
+            }
+            position_std = std::sqrt(variance / world_positions_history_.size());
         }
-        position_std = std::sqrt(variance / world_positions_history_.size());
-    }
 
-    Eigen::Vector3d ypr_gimbal = eulers(gimbal_quaternion, 2, 1, 0) * 180 / M_PI;
+        position_std /= 1000.0; // history is mm; displayed values and thresholds are m
 
-    std::vector<cv::Point2f> reprojected_points;
-    cv::projectPoints(
-        object_points,
-        rvec_board2camera,
-        tvec_board2camera,
-        this->camera_matrix_,
-        this->distort_coeffs_,
-        reprojected_points
-    );
-    double reprojection_error = calculate_reprojection_error(pixel_points, reprojected_points);
+        const Eigen::Vector3d gimbal_ros_ypr = eulers(gimbal_quaternion, 2, 1, 0) * 180 / M_PI;
+        const double tf_pitch = clean_display_zero(gimbal_ros_ypr[1]);
+        const double aim_pitch = clean_display_zero(-gimbal_ros_ypr[1]);
+        const double gimbal_yaw = clean_display_zero(gimbal_ros_ypr[0]);
+        const double gimbal_roll = clean_display_zero(gimbal_ros_ypr[2]);
+        left_text("GIMBAL ROS TF / odom", 100);
+        left_text(fmt::format("Y {:+.2f} P {:+.2f} R {:+.2f} deg",
+                              gimbal_yaw, tf_pitch, gimbal_roll), 142);
+        left_text(fmt::format("P_TF = -({:+.2f}) = {:+.2f} deg", aim_pitch, tf_pitch), 184);
+        left_text("GIMBAL AIM / up+", 242);
+        left_text(fmt::format("Y {:+.2f} P {:+.2f} R {:+.2f} deg",
+                              gimbal_yaw, aim_pitch, gimbal_roll), 284);
+        left_text(fmt::format("P_AIM = -({:+.2f}) = {:+.2f} deg", tf_pitch, aim_pitch), 326);
 
-    int y_offset = 30;
-    int line_height = 28;
+        const double board_x = t_board2world.at<double>(0) / 1000.0;
+        const double board_y = t_board2world.at<double>(1) / 1000.0;
+        const double board_z = t_board2world.at<double>(2) / 1000.0;
+        const double board_yaw = std::atan2(board_y, board_x) * 180.0 / M_PI;
+        const double board_pitch = std::atan2(board_z, std::hypot(board_x, board_y)) * 180.0 / M_PI;
+        const double board_distance = std::hypot(std::hypot(board_x, board_y), board_z);
 
-    cv::putText(
-        img,
-        fmt::format(
-            "Gimbal RPY (World): Y{:.2f} P{:.2f} R{:.2f} deg",
-            ypr_gimbal[0],
-            ypr_gimbal[1],
-            ypr_gimbal[2]
-        ),
-        { 40, y_offset },
-        cv::FONT_HERSHEY_SIMPLEX,
-        0.65,
-        { 255, 0, 0 },
-        2
-    );
-    y_offset += line_height;
+        // Match the solver's display convention: board +X is the inward normal,
+        // +Y points left, +Z points up. PnP's RDU board points stay unchanged.
+        const Eigen::Matrix3d R_flu2rdu { { 0, -1, 0 }, { 0, 0, -1 }, { 1, 0, 0 } };
+        Eigen::Matrix3d R_board_rdu2world;
+        cv::cv2eigen(R_board2world, R_board_rdu2world);
+        const Eigen::Vector3d board_face_ypr =
+            eulers(Eigen::Quaterniond(R_board_rdu2world * R_flu2rdu), 2, 1, 0) * 180.0 / M_PI;
 
-    cv::Scalar world_pos_color = position_std < 0.01 ? cv::Scalar(0, 255, 0)
-        : position_std < 0.02                        ? cv::Scalar(0, 165, 255)
-                                                      : cv::Scalar(0, 0, 255);
-    cv::putText(
-        img,
-        fmt::format(
-            "Board2World Pos: X{:.3f} Y{:.3f} Z{:.3f} m",
-            t_board2world.at<double>(0),
-            t_board2world.at<double>(1),
-            t_board2world.at<double>(2)
-        ),
-        { 40, y_offset },
-        cv::FONT_HERSHEY_SIMPLEX,
-        0.65,
-        world_pos_color,
-        2
-    );
-    y_offset += line_height;
+        right_text("BOARD O / odom", 100);
+        right_text(fmt::format("XYZ [m]: X{:+.3f} Y{:+.3f} Z{:+.3f}",
+                               board_x, board_y, board_z), 142);
+        right_text("BOARD O YPD / odom origin", 200);
+        right_text(fmt::format("YPD [deg,m]: Y{:+.2f} P{:+.2f} D{:.3f}",
+                               clean_display_zero(board_yaw), clean_display_zero(board_pitch),
+                               board_distance), 242);
+        right_text("BOARD FACE YPR / odom", 300);
+        right_text(fmt::format("YPR [deg]: Y{:+.2f} P{:+.2f} R{:+.2f}",
+                               clean_display_zero(board_face_ypr[0]),
+                               clean_display_zero(board_face_ypr[1]),
+                               clean_display_zero(board_face_ypr[2])), 342);
 
-    Eigen::Matrix3d R_board2world_eigen;
-    cv::cv2eigen(R_board2world, R_board2world_eigen);
-    Eigen::Quaterniond q_board2world(R_board2world_eigen);
-    Eigen::Vector3d ypr_board2world = eulers(q_board2world, 2, 1, 0) * 180 / M_PI;
+        const auto bottom_text = [&](const std::string& line, int reference_y) {
+            const int y = img.rows - static_cast<int>(std::lround((1080 - reference_y) * layout_scale));
+            draw_handeye_text(img, line, {margin, y}, layout_scale, left_width);
+        };
+        const char* position_status = world_positions_history_.size() < 5 ? "COLLECTING"
+            : position_std < 0.01 ? "GOOD" : position_std < 0.02 ? "WARN" : "POOR";
+        const char* reprojection_status = reprojection_error < 1.0 ? "GOOD"
+            : reprojection_error < 2.0 ? "WARN" : "POOR";
+        bottom_text("VALIDATION", 958);
+        bottom_text(fmt::format("O StdDev: {:.4f} m (N={}) {}", position_std,
+                                world_positions_history_.size(), position_status), 1000);
+        bottom_text(fmt::format("Reproj RMSE: {:.2f} px {}", reprojection_error,
+                                reprojection_status), 1042);
 
-    cv::putText(
-        img,
-        fmt::format(
-            "Board2World RPY: Y{:.2f} P{:.2f} R{:.2f} deg",
-            ypr_board2world[0],
-            ypr_board2world[1],
-            ypr_board2world[2]
-        ),
-        { 40, y_offset },
-        cv::FONT_HERSHEY_SIMPLEX,
-        0.65,
-        { 0, 255, 0 },
-        2
-    );
-    y_offset += line_height;
-
-    cv::putText(
-        img,
-        fmt::format(
-            "Position StdDev: {:.4f} m (N={})",
-            position_std,
-            world_positions_history_.size()
-        ),
-        { 40, y_offset },
-        cv::FONT_HERSHEY_SIMPLEX,
-        0.65,
-        world_pos_color,
-        2
-    );
-    y_offset += line_height;
-
-    double position_error = cv::norm(t_board2gimbal);
-    cv::putText(
-        img,
-        fmt::format("Board2Gimbal Dist: {:.3f} m", position_error),
-        { 40, y_offset },
-        cv::FONT_HERSHEY_SIMPLEX,
-        0.65,
-        { 0, 165, 255 },
-        2
-    );
-    y_offset += line_height;
-
-    cv::Scalar error_color = reprojection_error < 1.0 ? cv::Scalar(0, 255, 0)
-        : reprojection_error < 2.0                    ? cv::Scalar(0, 165, 255)
-                                                       : cv::Scalar(0, 0, 255);
-    cv::putText(
-        img,
-        fmt::format("Reprojection Error: {:.2f} px", reprojection_error),
-        { 40, y_offset },
-        cv::FONT_HERSHEY_SIMPLEX,
-        0.65,
-        error_color,
-        2
-    );
-    y_offset += line_height;
-
-    if (world_positions_history_.size() < 5) {
-        cv::putText(
-            img,
-            "Tip: Rotate gimbal to collect more data",
-            { 40, y_offset },
-            cv::FONT_HERSHEY_SIMPLEX,
-            0.6,
-            { 255, 255, 0 },
-            2
+        std::vector<cv::Point3f> axis_points = {
+            cv::Point3f(0, 0, 0),
+            cv::Point3f(paramer_.squareSize * 3, 0, 0),
+            cv::Point3f(0, paramer_.squareSize * 3, 0),
+            cv::Point3f(0, 0, -paramer_.squareSize * 3)
+        };
+        std::vector<cv::Point2f> projected_axis;
+        cv::projectPoints(
+            axis_points,
+            rvec_board2camera,
+            tvec_board2camera,
+            this->camera_matrix_,
+            this->distort_coeffs_,
+            projected_axis
         );
-    }
 
-    cv::putText(
-        img,
-        fmt::format("Board2Camera Dist: {:.3f} m", cv::norm(tvec_board2camera)),
-        { 40, y_offset },
-        cv::FONT_HERSHEY_SIMPLEX,
-        0.65,
-        { 0, 165, 255 },
-        2
-    );
-
-    std::vector<cv::Point3f> axis_points = {
-        cv::Point3f(0, 0, 0),
-        cv::Point3f(paramer_.squareSize * 3, 0, 0),
-        cv::Point3f(0, paramer_.squareSize * 3, 0),
-        cv::Point3f(0, 0, -paramer_.squareSize * 3)
-    };
-    std::vector<cv::Point2f> projected_axis;
-    cv::projectPoints(
-        axis_points,
-        rvec_board2camera,
-        tvec_board2camera,
-        this->camera_matrix_,
-        this->distort_coeffs_,
-        projected_axis
-    );
-
-    if (projected_axis.size() >= 4) {
-        cv::line(img, projected_axis[0], projected_axis[1], cv::Scalar(0, 0, 255),
-                 3);
-        cv::line(img, projected_axis[0], projected_axis[2], cv::Scalar(0, 255, 0),
-                 3);
-        cv::line(img, projected_axis[0], projected_axis[3], cv::Scalar(255, 0, 0),
-                 3);
+        if (projected_axis.size() == 4) {
+            const cv::Scalar colors[] = {{0,0,255}, {0,255,0}, {255,0,0}};
+            for (int i=1; i<4; ++i)
+                if (is_drawable_image_point(projected_axis[0], img.size()) &&
+                    is_drawable_image_point(projected_axis[i], img.size()))
+                    cv::line(img, projected_axis[0], projected_axis[i], colors[i-1], 3);
+        }
+    } catch (const cv::Exception& e) {
+        std::cerr << "[validate_handeye] " << e.what() << std::endl;
+        fail();
     }
 }
 

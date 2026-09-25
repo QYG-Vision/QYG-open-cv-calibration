@@ -51,7 +51,7 @@ static std::vector<std::string> normalize_args(int argc, char* argv[]) {
  * @param argv 参数列表
  * @return int 退出码
  */
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) try {
     // 预处理：将 -k val 转换为 -k=val（cv::CommandLineParser 要求等号分隔）
     auto norm_args = normalize_args(argc, argv);
     std::vector<const char*> norm_argv;
@@ -132,7 +132,6 @@ int main(int argc, char* argv[]) {
 
         bool enable_collect = (key == 's');
         calibrate_.collect_handeye(img, q, enable_collect);
-        calibrate_.show_collected_corners(img);
         calibrate_.display_rpy(img, q); // 可视化角度
 
         stats.tickPublish(img.cols, img.rows);
@@ -143,4 +142,7 @@ int main(int argc, char* argv[]) {
 
     std::cout << "标定完成，程序退出" << std::endl;
     return 0;
+} catch (const std::exception& e) {
+    std::cerr << "手眼标定失败: " << e.what() << std::endl;
+    return 1;
 }

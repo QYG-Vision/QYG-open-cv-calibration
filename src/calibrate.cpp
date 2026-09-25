@@ -131,8 +131,8 @@ void Calibrate::display_error(cv::Mat& img) {
     validation_->display_error(img);
 }
 
-void Calibrate::show_collected_corners(cv::Mat& img) {
-    extrinsic_->show_collected_corners(img);
+int Calibrate::collected_handeye_count() const {
+    return extrinsic_->collected_count();
 }
 
 bool Calibrate::load_handeye_calibration(const std::string& handeye_yaml_path) {
