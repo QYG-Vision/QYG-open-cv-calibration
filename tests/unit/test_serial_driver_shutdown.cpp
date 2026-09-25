@@ -2,7 +2,10 @@
 
 #include <chrono>
 #include <array>
+#include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <pty.h>
@@ -16,13 +19,23 @@ namespace {
 
 constexpr auto CHILD_EXIT_TIMEOUT = std::chrono::milliseconds(600);
 
-std::array<uint8_t, 16> make_frame(int16_t yaw_centidegrees) {
-    return {
-        0xff, 0x00, 0x00, 0x00, 0x00, 0x00,
-        static_cast<uint8_t>((yaw_centidegrees >> 8) & 0xff),
-        static_cast<uint8_t>(yaw_centidegrees & 0xff),
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0d
-    };
+std::array<uint8_t, 39> make_frame(float yaw_degrees, float pitch_degrees = 0.0F) {
+    std::array<uint8_t, 39> frame{};
+    frame[0] = 'G';
+    frame[1] = 'D';
+    std::memcpy(frame.data() + 17, &yaw_degrees, sizeof(yaw_degrees));
+    std::memcpy(frame.data() + 21, &pitch_degrees, sizeof(pitch_degrees));
+
+    uint16_t crc = 0xFFFF;
+    for (size_t i = 0; i < frame.size() - 2; ++i) {
+        crc ^= frame[i];
+        for (int bit = 0; bit < 8; ++bit)
+            crc = (crc & 1U) ? static_cast<uint16_t>((crc >> 1U) ^ 0x8408U)
+                             : static_cast<uint16_t>(crc >> 1U);
+    }
+    frame[37] = static_cast<uint8_t>(crc & 0xFFU);
+    frame[38] = static_cast<uint8_t>(crc >> 8U);
+    return frame;
 }
 
 class SerialDriverShutdownTest : public ::testing::Test {
@@ -111,11 +124,12 @@ TEST_F(SerialDriverShutdownTest, ReadReturnsPromptlyWithoutIncomingData) {
 
 TEST_F(SerialDriverShutdownTest, ReadsFrameSplitAcrossMultipleSerialReads) {
     Serial_driver driver(config_path_.string());
-    const auto frame = make_frame(3000);
+    const auto frame = make_frame(30.0F);
 
     ASSERT_EQ(write(master_fd_, frame.data(), 8), 8);
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    ASSERT_EQ(write(master_fd_, frame.data() + 8, 8), 8);
+    ASSERT_EQ(write(master_fd_, frame.data() + 8, frame.size() - 8),
+              static_cast<ssize_t>(frame.size() - 8));
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
     const Eigen::Quaterniond expected = driver.rpyToQuat(0.0, 0.0, 30.0);
@@ -123,10 +137,24 @@ TEST_F(SerialDriverShutdownTest, ReadsFrameSplitAcrossMultipleSerialReads) {
     EXPECT_GT(std::abs(actual.dot(expected)), 0.999);
 }
 
+TEST_F(SerialDriverShutdownTest, ConvertsQygHeadUpPitchToRosGimbalPitch) {
+    Serial_driver driver(config_path_.string());
+    const auto frame = make_frame(0.0F, 10.0F);
+    ASSERT_EQ(write(master_fd_, frame.data(), frame.size()),
+              static_cast<ssize_t>(frame.size()));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    const Eigen::Quaterniond actual = driver.read(std::chrono::steady_clock::now());
+    EXPECT_NEAR(actual.w(), 0.9961946980917455, 1e-9);
+    EXPECT_NEAR(actual.x(), 0.0, 1e-9);
+    EXPECT_NEAR(actual.y(), -0.08715574274765817, 1e-9);
+    EXPECT_NEAR(actual.z(), 0.0, 1e-9);
+}
+
 TEST_F(SerialDriverShutdownTest, InterpolatesBetweenBracketingSerialSamples) {
     Serial_driver driver(config_path_.string());
-    const auto first = make_frame(0);
-    const auto second = make_frame(2000);
+    const auto first = make_frame(0.0F);
+    const auto second = make_frame(20.0F);
     ASSERT_EQ(write(master_fd_, first.data(), first.size()), static_cast<ssize_t>(first.size()));
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
