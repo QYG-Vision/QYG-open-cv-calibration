@@ -1,5 +1,7 @@
 #include "task_controller.hpp"
+#include "intrinsic_result_parser.hpp"
 
+#include <array>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -138,6 +140,68 @@ TaskController::TaskController(const std::string& config_path,
                 old_distort_coeffs_.at<double>(i) = dc[i].as<double>();
         }
     } catch (...) {}
+    publish_snapshot();
+}
+
+void TaskController::enqueue_start(TaskType type) {
+    std::lock_guard<std::mutex> lock(command_mtx_);
+    commands_.push_back({TaskCommand::Kind::start, type, TaskAction::collect});
+}
+
+void TaskController::enqueue_stop() {
+    std::lock_guard<std::mutex> lock(command_mtx_);
+    commands_.push_back({TaskCommand::Kind::stop});
+}
+
+void TaskController::enqueue_action(TaskAction action) {
+    std::lock_guard<std::mutex> lock(command_mtx_);
+    commands_.push_back({TaskCommand::Kind::action, TaskType::intrinsic_calibration, action});
+}
+
+void TaskController::drain_commands() {
+    std::deque<TaskCommand> pending;
+    {
+        std::lock_guard<std::mutex> lock(command_mtx_);
+        pending.swap(commands_);
+    }
+    for (const auto& command : pending) {
+        try {
+            if (command.kind == TaskCommand::Kind::start) {
+                const auto error = start_task(command.task_type);
+                if (!error.empty()) log(error);
+            } else if (command.kind == TaskCommand::Kind::stop) {
+                stop_task();
+            } else if (command.action == TaskAction::collect) {
+                pending_collect_ = true;
+            } else {
+                const auto result = handle_action(command.action);
+                if (result != "OK" && result != "当前任务不支持重置") log(result);
+            }
+        } catch (const std::exception& e) {
+            error_message_ = e.what();
+            set_state(TaskState::failed);
+            log("任务执行失败: " + error_message_);
+        }
+        publish_snapshot();
+    }
+}
+
+void TaskController::render_frame(cv::Mat& img,
+                                  const std::chrono::steady_clock::time_point& timestamp,
+                                  bool manual_collect) {
+    const bool collect = manual_collect || pending_collect_;
+    pending_collect_ = false;
+    if (state_ == TaskState::running)
+        process_frame(img, timestamp, collect);
+    else if (state_ == TaskState::review_pending)
+        calibrate_->display_error(img);
+    publish_snapshot();
+}
+
+void TaskController::publish_snapshot() {
+    auto next = build_snapshot();
+    std::lock_guard<std::mutex> lock(snapshot_mtx_);
+    published_snapshot_ = std::move(next);
 }
 
 void TaskController::set_serial(std::unique_ptr<Serial_driver> serial) {
@@ -286,6 +350,7 @@ std::string TaskController::handle_action(TaskAction action) {
 
             set_state(TaskState::computing);
             phase_ = "正在计算...";
+            publish_snapshot();
 
             if (task_type_ == TaskType::intrinsic_calibration) {
                 bool ok = calibrate_->calibrate_camera();
@@ -324,6 +389,9 @@ std::string TaskController::handle_action(TaskAction action) {
 
                     std::ofstream fout(config_path_);
                     fout << cfg;
+                    fout.close();
+                    if (!fout)
+                        throw std::runtime_error("写入配置文件失败: " + config_path_);
 
                     // 同步到 calibrate
                     calibrate_->sync_validation_intrinsics_from_calibration();
@@ -407,24 +475,17 @@ void TaskController::process_frame(
 // ---------------------------------------------------------------------------
 
 void TaskController::finalize_intrinsic_result() {
-    // 从最新标定结果读取内参
+    std::string error;
     try {
-        auto calib = YAML::LoadFile("camera_calibration.yaml");
-        if (calib["camera_matrix"] && calib["camera_matrix"].IsSequence()) {
-            auto cm = calib["camera_matrix"];
-            for (int i = 0; i < 9; ++i)
-                (&new_camera_matrix_(0,0))[i] = cm[i].as<double>();
-        }
-        if (calib["distort_coeffs"] && calib["distort_coeffs"].IsSequence()) {
-            new_distort_coeffs_ = cv::Mat(1, 5, CV_64F);
-            auto dc = calib["distort_coeffs"];
-            for (int i = 0; i < 5; ++i)
-                new_distort_coeffs_.at<double>(i) = dc[i].as<double>();
-        }
-        has_new_intrinsics_ = true;
-    } catch (...) {
+        has_new_intrinsics_ = parse_intrinsic_result(
+            YAML::LoadFile("camera_calibration.yaml"), new_camera_matrix_,
+            new_distort_coeffs_, error);
+    } catch (const std::exception& e) {
         has_new_intrinsics_ = false;
+        error = e.what();
     }
+    if (!has_new_intrinsics_)
+        log("警告: 无法解析新内参: " + error);
 
     // 同步新内参到 calibrate 以便重投影显示
     if (has_new_intrinsics_) {
@@ -438,7 +499,8 @@ void TaskController::finalize_intrinsic_result() {
 }
 
 TaskSnapshot TaskController::snapshot() const {
-    return build_snapshot();
+    std::lock_guard<std::mutex> lock(snapshot_mtx_);
+    return published_snapshot_;
 }
 
 TaskSnapshot TaskController::build_snapshot() const {

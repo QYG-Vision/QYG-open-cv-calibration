@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <deque>
 #include <functional>
@@ -114,6 +115,20 @@ public:
     /// @return 操作结果描述
     std::string handle_action(TaskAction action);
 
+    /// @brief HTTP 线程只提交命令；主线程调用 drain_commands 执行。
+    void enqueue_start(TaskType type);
+    void enqueue_stop();
+    void enqueue_action(TaskAction action);
+    void drain_commands();
+
+    /// @brief 处理并绘制一帧，包含 review_pending 阶段的误差覆盖层。
+    void render_frame(cv::Mat& img,
+                      const std::chrono::steady_clock::time_point& timestamp,
+                      bool manual_collect = false);
+
+    /// @brief 主线程发布不可变的状态副本供 HTTP 线程读取。
+    void publish_snapshot();
+
     /// @brief 每帧处理：驱动当前任务逻辑
     /// @param img            原始图像
     /// @param timestamp      帧时间戳
@@ -134,10 +149,12 @@ public:
     /// @brief 当前任务类型
     TaskType task_type() const { return task_type_; }
 
-    /// @brief 校准门面
-    calibrate::Calibrate& calibrate() { return *calibrate_; }
-
 private:
+    struct TaskCommand {
+        enum class Kind { start, stop, action } kind;
+        TaskType task_type = TaskType::intrinsic_calibration;
+        TaskAction action = TaskAction::collect;
+    };
     void log(const std::string& msg);
     void set_state(TaskState s);
     TaskSnapshot build_snapshot() const;
@@ -160,7 +177,7 @@ private:
     std::string serial_error_message_;
 
     TaskType  task_type_ = TaskType::intrinsic_calibration;
-    TaskState state_     = TaskState::idle;
+    std::atomic<TaskState> state_{TaskState::idle};
     std::string phase_;
     std::string result_path_;
     std::string backup_path_;
@@ -168,6 +185,7 @@ private:
 
     bool calibration_done_ = false;
     bool auto_collect_ = false;
+    bool pending_collect_ = false;
 
     /// 内参确认流：临时保存新标定的内参
     bool        has_new_intrinsics_ = false;
@@ -178,6 +196,10 @@ private:
 
     mutable std::mutex mtx_;
     std::deque<std::string> log_buf_;
+    mutable std::mutex command_mtx_;
+    std::deque<TaskCommand> commands_;
+    mutable std::mutex snapshot_mtx_;
+    TaskSnapshot published_snapshot_;
     static constexpr size_t kMaxLogLines = 200;
 };
 

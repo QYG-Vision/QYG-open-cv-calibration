@@ -103,6 +103,24 @@ if(BUILD_TESTING)
     target_link_libraries(test_thread_safe_queue PRIVATE gtest_main Threads::Threads)
     gtest_discover_tests(test_thread_safe_queue)
 
+    add_executable(test_intrinsic_result_parser tests/unit/test_intrinsic_result_parser.cpp)
+    target_link_libraries(test_intrinsic_result_parser PRIVATE gtest_main calibration_core)
+    gtest_discover_tests(test_intrinsic_result_parser)
+
+    add_executable(test_reprojection_validation tests/unit/test_reprojection_validation.cpp)
+    target_compile_definitions(test_reprojection_validation PRIVATE TEST_DATA_DIR="${TEST_DATA_DIR}")
+    target_link_libraries(test_reprojection_validation PRIVATE gtest_main calibration_core)
+    gtest_discover_tests(test_reprojection_validation)
+
+    add_executable(test_task_controller tests/unit/test_task_controller.cpp)
+    target_compile_definitions(test_task_controller PRIVATE TEST_DATA_DIR="${TEST_DATA_DIR}")
+    target_link_libraries(test_task_controller PRIVATE gtest_main calibration_core)
+    gtest_discover_tests(test_task_controller)
+
+    add_executable(test_serial_driver_shutdown tests/unit/test_serial_driver_shutdown.cpp)
+    target_link_libraries(test_serial_driver_shutdown PRIVATE gtest_main calibration_core util)
+    gtest_discover_tests(test_serial_driver_shutdown)
+
     # AutoCollector
     add_executable(test_auto_collector tests/unit/test_auto_collector.cpp)
     target_include_directories(test_auto_collector PRIVATE ${PROJECT_SOURCE_DIR}/include)

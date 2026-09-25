@@ -130,7 +130,7 @@ bool UartTransporter::setParam(int speed, int flow_ctrl, int databits, int stopb
 
     // 设置等待时间和最小接收字符
     options.c_cc[VTIME] = 1; // 读取一个字符等待1*(1/10)s
-    options.c_cc[VMIN] = 1; // 读取字符的最少个数为1
+    options.c_cc[VMIN] = 0; // 允许 VTIME 在没有收到首字节时超时返回
     tcflush(fd_, TCIFLUSH);
 
     // 激活配置 (将修改后的termios数据设置到串口中）

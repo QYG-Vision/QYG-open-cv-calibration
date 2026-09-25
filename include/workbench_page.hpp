@@ -394,7 +394,7 @@ async function startTask() {
       body: JSON.stringify({task_type: currentTask})
     });
     const txt = await r.text();
-    if (r.ok) { toast('任务已启动'); fetchSession(); }
+    if (r.ok) { toast('启动指令已提交'); fetchSession(); }
     else { toast('启动失败: '+txt); fetchSession(); }
   } catch(e) { toast('请求失败'); }
 }
@@ -562,17 +562,17 @@ document.body.addEventListener('keydown', e => {
   else if (e.key === 'Backspace') code = 8;
   else if (e.key.length === 1) code = e.key.charCodeAt(0);
   else return;
+  // 工作台动作走同一 API，避免 /key 和 /api/tasks/action 重复执行。
+  if (code === 27) { stopTask(); return; }
+  if (e.key === 's') { sendAction('collect'); return; }
+  if (e.key === 'a') { sendAction('toggle_auto_collect'); return; }
+  if (e.key === 'c') { sendAction('compute'); return; }
+  if (e.key === 'r') { sendAction('reset'); return; }
   fetch('/key', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({key: code})
   }).catch(() => {});
-  // map to frontend actions too
-  if (code === 27) stopTask();
-  else if (e.key === 's') sendAction('collect');
-  else if (e.key === 'a') sendAction('toggle_auto_collect');
-  else if (e.key === 'c') sendAction('compute');
-  else if (e.key === 'r') sendAction('reset');
 });
 
 init();

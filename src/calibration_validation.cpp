@@ -7,6 +7,8 @@
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core/mat.hpp>
 
+#include "reprojection_validation.hpp"
+
 namespace qd::calibrate {
 
 CalibrationValidation::CalibrationValidation(
@@ -20,6 +22,11 @@ CalibrationValidation::CalibrationValidation(
 }
 
 void CalibrationValidation::display_error(cv::Mat& img) {
+    const auto fail = [&img](const std::string& reason) {
+        std::cerr << "[display_error] " << reason << std::endl;
+        cv::putText(img, "PnP failed", {40, 40}, cv::FONT_HERSHEY_SIMPLEX,
+                    1.0, {0, 0, 255}, 2);
+    };
     std::vector<Point2f> pixel_points;
     vector<Point3f> object_points;
     auto found = detect_board(paramer_, img, pixel_points, object_points);
@@ -27,11 +34,49 @@ void CalibrationValidation::display_error(cv::Mat& img) {
         return;
     }
 
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            if (!std::isfinite(camera_matrix_(row, col))) {
+                fail("相机矩阵包含 NaN/Inf");
+                return;
+            }
+        }
+    }
+    if (distort_coeffs_.empty() || !cv::checkRange(distort_coeffs_)) {
+        fail("畸变参数为空或包含 NaN/Inf");
+        return;
+    }
+
     cv::Mat rvec, tvec;
-    cv::solvePnP(object_points, pixel_points, camera_matrix_, distort_coeffs_, rvec, tvec);
+    bool pnp_ok = false;
+    try {
+        pnp_ok = cv::solvePnP(
+            object_points, pixel_points, camera_matrix_, distort_coeffs_, rvec, tvec);
+    } catch (const cv::Exception& e) {
+        fail(std::string("solvePnP 异常: ") + e.what());
+        return;
+    }
+    if (!pnp_ok || !is_finite_pose_vector(rvec) || !is_finite_pose_vector(tvec)) {
+        fail("PnP 返回失败或位姿包含 NaN/Inf");
+        return;
+    }
+
+    cv::Mat tvec64;
+    tvec.convertTo(tvec64, CV_64F);
 
     std::vector<cv::Point2f> projected_points;
-    cv::projectPoints(object_points, rvec, tvec, camera_matrix_, distort_coeffs_, projected_points);
+    try {
+        cv::projectPoints(
+            object_points, rvec, tvec, camera_matrix_, distort_coeffs_, projected_points);
+    } catch (const cv::Exception& e) {
+        fail(std::string("projectPoints 异常: ") + e.what());
+        return;
+    }
+    if (projected_points.size() != pixel_points.size() ||
+        !are_finite_image_points(projected_points)) {
+        fail("重投影点数量不符或包含 NaN/Inf");
+        return;
+    }
 
     double error = calculate_reprojection_error(pixel_points, projected_points);
 
@@ -48,9 +93,9 @@ void CalibrationValidation::display_error(cv::Mat& img) {
         img,
         fmt::format(
             "tvec: {:.2f} {:.2f} {:.2f}",
-            tvec.at<double>(0),
-            tvec.at<double>(1),
-            tvec.at<double>(2)
+            tvec64.at<double>(0),
+            tvec64.at<double>(1),
+            tvec64.at<double>(2)
         ),
         { 40, 80 },
         cv::FONT_HERSHEY_SIMPLEX,
@@ -68,10 +113,10 @@ void CalibrationValidation::display_error(cv::Mat& img) {
         2
     );
     for (size_t i = 0; i < pixel_points.size(); i++) {
-        cv::circle(img, pixel_points[i], 3, cv::Scalar(0, 0, 255),
-                   -1);
-        cv::circle(img, projected_points[i], 2, cv::Scalar(255, 0, 0),
-                   -1);
+        if (is_drawable_image_point(pixel_points[i], img.size()))
+            cv::circle(img, pixel_points[i], 3, cv::Scalar(0, 0, 255), -1);
+        if (is_drawable_image_point(projected_points[i], img.size()))
+            cv::circle(img, projected_points[i], 2, cv::Scalar(255, 0, 0), -1);
     }
 }
 

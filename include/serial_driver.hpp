@@ -52,8 +52,8 @@ public:
     Eigen::Quaterniond rpyToQuat(double roll, double pitch, double yaw);
 
 private:
-    IMUData data_ahead_;
-    IMUData data_behind_;
+    IMUData data_ahead_{ Eigen::Quaterniond::Identity(), 0.0, 0.0, 0.0, {} };
+    IMUData data_behind_{ Eigen::Quaterniond::Identity(), 0.0, 0.0, 0.0, {} };
 
     uint8_t tmp_buffer_[capacity];
 

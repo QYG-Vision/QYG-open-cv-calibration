@@ -120,16 +120,15 @@ int main(int argc, char* argv[]) {
         else if (type_str == "handeye_validation") type = TaskType::handeye_validation;
         else if (type_str == "handeye_recalibration") type = TaskType::handeye_recalibration;
 
-        auto err = task_ctrl.start_task(type);
-        if (err.empty()) return {200, "text/plain", "OK"};
-        return {400, "text/plain", err};
+        task_ctrl.enqueue_start(type);
+        return {202, "text/plain", "任务指令已提交"};
     });
 
     // POST /api/tasks/stop
     viewer.addRoute("POST", "/api/tasks/stop", [&](const std::string&, const std::string&,
                                                      const std::string&) -> RouteResponse {
-        task_ctrl.stop_task();
-        return {200, "text/plain", "OK"};
+        task_ctrl.enqueue_stop();
+        return {202, "text/plain", "停止指令已提交"};
     });
 
     // POST /api/tasks/action
@@ -145,8 +144,8 @@ int main(int argc, char* argv[]) {
         else if (action_str == "accept_intrinsics") action = TaskAction::accept_intrinsics;
         else if (action_str == "reject_intrinsics") action = TaskAction::reject_intrinsics;
 
-        auto result = task_ctrl.handle_action(action);
-        return {200, "text/plain", result};
+        task_ctrl.enqueue_action(action);
+        return {202, "text/plain", "操作指令已提交"};
     });
 
     // GET /api/session
@@ -190,6 +189,7 @@ int main(int argc, char* argv[]) {
     std::chrono::steady_clock::time_point timestamp;
 
     while (g_running) {
+        task_ctrl.drain_commands();
         Mat img;
         device->read(img, timestamp);
         stats.tickCapture(!img.empty());
@@ -210,8 +210,8 @@ int main(int argc, char* argv[]) {
         int key = viewer.waitKey(wait_time);
 
         if (key == 27) {
-            if (task_ctrl.state() == TaskState::running)
-                task_ctrl.stop_task();
+            task_ctrl.enqueue_stop();
+            task_ctrl.drain_commands();
             break;
         }
 
@@ -220,26 +220,16 @@ int main(int argc, char* argv[]) {
         if (key == 's') {
             manual = true;
         } else if (key == 'a') {
-            task_ctrl.handle_action(TaskAction::toggle_auto_collect);
+            task_ctrl.enqueue_action(TaskAction::toggle_auto_collect);
         } else if (key == 'c') {
-            task_ctrl.handle_action(TaskAction::compute);
+            task_ctrl.enqueue_action(TaskAction::compute);
         } else if (key == ' ') {
-            task_ctrl.handle_action(TaskAction::skip);
+            task_ctrl.enqueue_action(TaskAction::skip);
         } else if (key == 'r' || key == 'R') {
-            task_ctrl.handle_action(TaskAction::reset);
+            task_ctrl.enqueue_action(TaskAction::reset);
         }
-
-        auto state = task_ctrl.state();
-
-        // 驱动任务帧处理 (包含自动采集 / 手眼数据读取 / 覆盖层绘制)
-        if (state == TaskState::running) {
-            task_ctrl.process_frame(img, timestamp, manual);
-        }
-
-        // 内参确认阶段：显示重投影误差
-        if (state == TaskState::review_pending) {
-            task_ctrl.calibrate().display_error(img);
-        }
+        task_ctrl.drain_commands();
+        task_ctrl.render_frame(img, timestamp, manual);
 
         stats.tickPublish(img.cols, img.rows);
         viewer.imshow("workbench", img);

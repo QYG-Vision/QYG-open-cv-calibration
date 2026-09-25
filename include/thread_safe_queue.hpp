@@ -1,6 +1,7 @@
 #ifndef TOOLS__THREAD_SAFE_QUEUE_HPP
 #define TOOLS__THREAD_SAFE_QUEUE_HPP
 
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <iostream>
@@ -59,6 +60,23 @@ public:
 
         value = queue_.front();
         queue_.pop();
+    }
+
+    /**
+     * @brief 在指定时间内尝试出队。
+     * @param[out] value 成功时写入的队首元素。
+     * @param timeout 最长等待时间。
+     * @return true 表示成功出队；false 表示超时且队列为空。
+     */
+    template<typename Rep, typename Period>
+    bool pop_for(T& value, const std::chrono::duration<Rep, Period>& timeout) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!not_empty_condition_.wait_for(lock, timeout, [this] { return !queue_.empty(); }))
+            return false;
+
+        value = queue_.front();
+        queue_.pop();
+        return true;
     }
 
     /**

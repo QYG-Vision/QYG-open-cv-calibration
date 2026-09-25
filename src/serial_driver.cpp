@@ -1,11 +1,13 @@
 #include "serial_driver.hpp"
 #include "uart_transporter.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <fmt/core.h>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <vector>
 
 Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
     auto yaml = YAML::LoadFile(config_path);
@@ -36,26 +38,37 @@ Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
     // queue_.push(data_behind_);
 
     daemon_thread_ = std::thread([this]() {
+        std::vector<uint8_t> receive_buffer;
         while (running_) {
-            int recv_len = uart_transporter->read(tmp_buffer_, capacity);
-            // 检查长度
-            if (recv_len != capacity) {
-                continue;
+            const int recv_len = uart_transporter->read(tmp_buffer_, capacity);
+            if (recv_len <= 0) continue;
+
+            receive_buffer.insert(receive_buffer.end(), tmp_buffer_, tmp_buffer_ + recv_len);
+            while (true) {
+                const auto header = std::find(receive_buffer.begin(), receive_buffer.end(), 0xff);
+                if (header == receive_buffer.end()) {
+                    receive_buffer.clear();
+                    break;
+                }
+                receive_buffer.erase(receive_buffer.begin(), header);
+                if (receive_buffer.size() < capacity) break;
+                if (receive_buffer[capacity - 1] != 0x0d) {
+                    receive_buffer.erase(receive_buffer.begin());
+                    continue;
+                }
+
+                const auto timestamp = std::chrono::steady_clock::now();
+                const auto roll = static_cast<int16_t>(
+                    (receive_buffer[2] << 8) | receive_buffer[3]) / 1e2;
+                const auto pitch = static_cast<int16_t>(
+                    (receive_buffer[4] << 8) | receive_buffer[5]) / 1e2;
+                const auto yaw = static_cast<int16_t>(
+                    (receive_buffer[6] << 8) | receive_buffer[7]) / 1e2;
+                const auto p = rpyToQuat(roll, pitch, yaw);
+
+                queue_.push({ p, roll, pitch, yaw, timestamp });
+                receive_buffer.erase(receive_buffer.begin(), receive_buffer.begin() + capacity);
             }
-            // 检查帧头，帧尾,
-            if ((tmp_buffer_[0] != 0xff) || (tmp_buffer_[capacity - 1] != 0x0d)) {
-                continue;
-            }
-
-            auto timestamp = std::chrono::steady_clock::now();
-
-            auto roll = (int16_t)((tmp_buffer_[2] << 8) | tmp_buffer_[3]) / 1e2;
-            auto pitch = (int16_t)((tmp_buffer_[4] << 8) | tmp_buffer_[5]) / 1e2;
-            auto yaw = (int16_t)((tmp_buffer_[6] << 8) | tmp_buffer_[7]) / 1e2;
-            auto p = rpyToQuat(roll, pitch, yaw);
-
-            // fmt::print("receve roll: {} 度, pitch: {} 度,yaw: {} 度 \n", roll, pitch, yaw);
-            queue_.push({ p, roll, pitch, yaw, timestamp });
         }
     });
     fmt::print("open serial finish \n");
@@ -73,14 +86,14 @@ Eigen::Quaterniond Serial_driver::read(std::chrono::steady_clock::time_point tim
     if (data_behind_.timestamp < timestamp)
         data_ahead_ = data_behind_;
 
-    while (true) {
-        // std::cout << "waiting for imu data..." << std::endl;
-
-        queue_.pop(data_behind_);
+    while (queue_.pop_for(data_behind_, std::chrono::milliseconds(100))) {
         if (data_behind_.timestamp > timestamp)
             break;
         data_ahead_ = data_behind_;
     }
+
+    if (data_behind_.timestamp <= timestamp)
+        return data_ahead_.q.normalized();
 
     Eigen::Quaterniond q_a = data_ahead_.q.normalized();
     Eigen::Quaterniond q_b = data_behind_.q.normalized();
@@ -91,10 +104,13 @@ Eigen::Quaterniond Serial_driver::read(std::chrono::steady_clock::time_point tim
     std::chrono::duration<double> t_ac = t_c - t_a;
 
     // 四元数插值
+    if (t_ab <= std::chrono::duration<double>::zero())
+        return q_b;
+
     auto k = t_ac / t_ab;
     Eigen::Quaterniond q_c = q_a.slerp(k, q_b).normalized();
 
-    return q_a;
+    return q_c;
 }
 
 /**
