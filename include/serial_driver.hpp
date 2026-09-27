@@ -1,5 +1,6 @@
 #pragma once
 
+#include "qd_protocol.hpp"
 #include "thread_safe_queue.hpp"
 #include "uart_transporter.hpp"
 #include <Eigen/Dense>
@@ -10,7 +11,7 @@
 #include <thread>
 #include <yaml-cpp/yaml.h>
 
-#define capacity 16
+#define capacity 256
 /**
  * @brief IMU 姿态数据
  */
@@ -58,6 +59,7 @@ private:
     uint8_t tmp_buffer_[capacity];
 
     std::unique_ptr<UartTransporter> uart_transporter;
+    qd::qdproto::QdStreamParser qd_parser_;
     tools::ThreadSafeQueue<IMUData> queue_;
     std::thread daemon_thread_;
     std::atomic<bool> running_ { true };

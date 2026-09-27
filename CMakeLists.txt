@@ -124,6 +124,18 @@ if(BUILD_TESTING)
     target_link_libraries(test_serial_driver_shutdown PRIVATE gtest_main calibration_core util)
     gtest_discover_tests(test_serial_driver_shutdown)
 
+    # QYG 串口协议（与 QD_Vision26 rm_serial_driver 字节级对齐）
+    add_executable(test_qyg_protocol tests/unit/test_qyg_protocol.cpp)
+    target_include_directories(test_qyg_protocol PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(test_qyg_protocol PRIVATE gtest_main calibration_core)
+    gtest_discover_tests(test_qyg_protocol)
+
+    # QD 串口协议（16 字节定长帧，标定工具当前使用的协议）
+    add_executable(test_qd_protocol tests/unit/test_qd_protocol.cpp)
+    target_include_directories(test_qd_protocol PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(test_qd_protocol PRIVATE gtest_main calibration_core)
+    gtest_discover_tests(test_qd_protocol)
+
     # AutoCollector
     add_executable(test_auto_collector tests/unit/test_auto_collector.cpp)
     target_include_directories(test_auto_collector PRIVATE ${PROJECT_SOURCE_DIR}/include)

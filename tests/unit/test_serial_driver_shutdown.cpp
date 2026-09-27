@@ -19,22 +19,17 @@ namespace {
 
 constexpr auto CHILD_EXIT_TIMEOUT = std::chrono::milliseconds(600);
 
-std::array<uint8_t, 39> make_frame(float yaw_degrees, float pitch_degrees = 0.0F) {
-    std::array<uint8_t, 39> frame{};
-    frame[0] = 'G';
-    frame[1] = 'D';
-    std::memcpy(frame.data() + 17, &yaw_degrees, sizeof(yaw_degrees));
-    std::memcpy(frame.data() + 21, &pitch_degrees, sizeof(pitch_degrees));
-
-    uint16_t crc = 0xFFFF;
-    for (size_t i = 0; i < frame.size() - 2; ++i) {
-        crc ^= frame[i];
-        for (int bit = 0; bit < 8; ++bit)
-            crc = (crc & 1U) ? static_cast<uint16_t>((crc >> 1U) ^ 0x8408U)
-                             : static_cast<uint16_t>(crc >> 1U);
-    }
-    frame[37] = static_cast<uint8_t>(crc & 0xFFU);
-    frame[38] = static_cast<uint8_t>(crc >> 8U);
+// QD 协议 16 字节回传帧：帧头 0xFF / 帧尾 0x0D，角度 int16 ×100 大端。
+std::array<uint8_t, 16> make_frame(float yaw_degrees, float pitch_degrees = 0.0F) {
+    std::array<uint8_t, 16> frame{};
+    frame[0] = 0xFF;
+    frame[15] = 0x0D;
+    const auto put_i16 = [&frame](size_t offset, int16_t value) {
+        frame[offset] = static_cast<uint8_t>(static_cast<uint16_t>(value) >> 8U);
+        frame[offset + 1] = static_cast<uint8_t>(value);
+    };
+    put_i16(4, static_cast<int16_t>(std::lround(pitch_degrees * 100.0F)));
+    put_i16(6, static_cast<int16_t>(std::lround(yaw_degrees * 100.0F)));
     return frame;
 }
 
@@ -137,8 +132,10 @@ TEST_F(SerialDriverShutdownTest, ReadsFrameSplitAcrossMultipleSerialReads) {
     EXPECT_GT(std::abs(actual.dot(expected)), 0.999);
 }
 
-TEST_F(SerialDriverShutdownTest, ConvertsQygHeadUpPitchToRosGimbalPitch) {
+TEST_F(SerialDriverShutdownTest, ConvertsQdPitchFeedbackToRosGimbalPitch) {
     Serial_driver driver(config_path_.string());
+    // 电控 raw pitch = +10°；QD 链路两层取负抵消，标定姿态（odom→gimbal_link TF）
+    // 直接使用电控原值：rpyToQuat(0, +10°, 0) → q.y = +sin(5°)。
     const auto frame = make_frame(0.0F, 10.0F);
     ASSERT_EQ(write(master_fd_, frame.data(), frame.size()),
               static_cast<ssize_t>(frame.size()));
@@ -147,7 +144,7 @@ TEST_F(SerialDriverShutdownTest, ConvertsQygHeadUpPitchToRosGimbalPitch) {
     const Eigen::Quaterniond actual = driver.read(std::chrono::steady_clock::now());
     EXPECT_NEAR(actual.w(), 0.9961946980917455, 1e-9);
     EXPECT_NEAR(actual.x(), 0.0, 1e-9);
-    EXPECT_NEAR(actual.y(), -0.08715574274765817, 1e-9);
+    EXPECT_NEAR(actual.y(), 0.08715574274765817, 1e-9);
     EXPECT_NEAR(actual.z(), 0.0, 1e-9);
 }
 

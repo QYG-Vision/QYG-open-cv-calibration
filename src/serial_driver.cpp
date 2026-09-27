@@ -1,54 +1,12 @@
+#include "qd_protocol.hpp"
 #include "serial_driver.hpp"
 #include "uart_transporter.hpp"
-#include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstddef>
-#include <cstdint>
-#include <cstring>
 #include <fmt/core.h>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
-#include <vector>
-
-namespace {
-
-#pragma pack(push, 1)
-struct QygReceiveFrame {
-    uint8_t header[2];
-    uint8_t current_mode;
-    float chassis_vx;
-    float chassis_vy;
-    float chassis_wz;
-    uint16_t sentry_state;
-    float yaw;
-    float pitch;
-    float roll;
-    float bullet_speed;
-    uint32_t mcu_timestamp;
-    uint16_t crc16;
-};
-#pragma pack(pop)
-
-static_assert(sizeof(QygReceiveFrame) == 39, "QYG receive frame must be 39 bytes");
-static_assert(offsetof(QygReceiveFrame, yaw) == 17, "Invalid QYG yaw offset");
-static_assert(offsetof(QygReceiveFrame, pitch) == 21, "Invalid QYG pitch offset");
-static_assert(offsetof(QygReceiveFrame, roll) == 25, "Invalid QYG roll offset");
-
-/// @brief 计算 QYG 回传帧使用的 CRC-16/DECT。
-uint16_t qyg_crc16(const uint8_t* data, size_t length) {
-    uint16_t crc = 0xFFFF;
-    for (size_t i = 0; i < length; ++i) {
-        crc ^= data[i];
-        for (int bit = 0; bit < 8; ++bit)
-            crc = (crc & 1U) ? static_cast<uint16_t>((crc >> 1U) ^ 0x8408U)
-                             : static_cast<uint16_t>(crc >> 1U);
-    }
-    return crc;
-}
-
-} // namespace
 
 Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
     auto yaml = YAML::LoadFile(config_path);
@@ -75,45 +33,31 @@ Serial_driver::Serial_driver(const std::string& config_path): queue_(5000) {
         throw std::runtime_error("serial open failed: " + port_name);
     }
 
-    daemon_thread_ = std::thread([this]() {
-        std::vector<uint8_t> receive_buffer;
-        constexpr std::array<uint8_t, 2> kHeader{'G', 'D'};
+    // 把"视觉内部约定"（pitch 抬头为正）的角度转成标定姿态并入队。
+    // 标定姿态与 QD 工程广播的 odom -> gimbal_link TF 同号：
+    // 解析层给出抬头为正的 pitch，此处取负转成 TF 右手系（抬头为负）。
+    auto push_pose = [this](double roll_deg, double pitch_deg, double yaw_deg) {
+        if (!std::isfinite(roll_deg) || !std::isfinite(pitch_deg) || !std::isfinite(yaw_deg))
+            return;
+        const auto timestamp = std::chrono::steady_clock::now();
+        const double ros_pitch = -pitch_deg;
+        const auto q = rpyToQuat(roll_deg, ros_pitch, yaw_deg);
+        queue_.push({q, roll_deg, ros_pitch, yaw_deg, timestamp});
+    };
+
+    daemon_thread_ = std::thread([this, push_pose]() {
         while (running_) {
             const int recv_len = uart_transporter->read(tmp_buffer_, capacity);
-            if (recv_len <= 0) continue;
-
-            receive_buffer.insert(receive_buffer.end(), tmp_buffer_, tmp_buffer_ + recv_len);
-            if (receive_buffer.size() > 4096)
-                receive_buffer.erase(receive_buffer.begin(), receive_buffer.end() - 1024);
-            while (true) {
-                const auto header = std::search(receive_buffer.begin(), receive_buffer.end(),
-                                                kHeader.begin(), kHeader.end());
-                if (header == receive_buffer.end()) {
-                    const bool keep_g = !receive_buffer.empty() && receive_buffer.back() == 'G';
-                    receive_buffer.clear();
-                    if (keep_g) receive_buffer.push_back('G');
-                    break;
+            if (recv_len > 0) {
+                qd_parser_.append(tmp_buffer_, static_cast<size_t>(recv_len));
+                while (true) {
+                    auto frame = qd_parser_.pop_frame();
+                    if (!frame.has_value()) break;
+                    const auto fb = qd::qdproto::decode_gimbal_feedback(*frame);
+                    push_pose(fb.roll_degrees, fb.pitch_degrees, fb.yaw_degrees);
                 }
-                receive_buffer.erase(receive_buffer.begin(), header);
-                if (receive_buffer.size() < sizeof(QygReceiveFrame)) break;
-
-                QygReceiveFrame frame{};
-                std::memcpy(&frame, receive_buffer.data(), sizeof(frame));
-                if (frame.crc16 != qyg_crc16(receive_buffer.data(), sizeof(frame) - 2)) {
-                    receive_buffer.erase(receive_buffer.begin());
-                    continue;
-                }
-                receive_buffer.erase(receive_buffer.begin(),
-                                     receive_buffer.begin() + sizeof(frame));
-                if (!std::isfinite(frame.roll) || !std::isfinite(frame.pitch)
-                    || !std::isfinite(frame.yaw))
-                    continue;
-
-                const auto timestamp = std::chrono::steady_clock::now();
-                // QYG pitch 抬头为正；标定姿态与 QD 的 odom -> gimbal_link TF 同号。
-                const double ros_pitch = -frame.pitch;
-                const auto q = rpyToQuat(frame.roll, ros_pitch, frame.yaw);
-                queue_.push({q, frame.roll, ros_pitch, frame.yaw, timestamp});
+            } else if (recv_len < 0) {
+                continue;
             }
         }
     });
